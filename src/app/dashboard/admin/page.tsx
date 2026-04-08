@@ -4,15 +4,16 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { Route, useRoutes } from '@/context/RouteContext';
 import { db } from '@/lib/firebase';
-import { deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, addDoc, deleteDoc, doc, updateDoc, Timestamp, setDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { MapPin, LogOut, Trash2, BusFront, Route as RouteIcon, Activity, Search, RefreshCw, Clock, Pencil, XCircle } from 'lucide-react';
+import { MapPin, LogOut, Trash2, BusFront, Route as RouteIcon, Activity, Search, RefreshCw, Clock, Pencil, XCircle, Shield, LayoutDashboard, Database, RefreshCcw } from 'lucide-react';
 import { LocationSearchInput } from '@/components/LocationSearchInput';
 import { GeocodingResult } from '@/lib/geocoding';
+import { DashboardHeader } from '@/components/DashboardHeader';
 
 interface DraftStop {
   id: string;
@@ -197,18 +198,7 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-zinc-50 flex flex-col">
-      <header className="bg-zinc-900 border-b border-zinc-800 px-6 py-4 flex justify-between items-center sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <div className="bg-primary/20 p-2 rounded-lg">
-            <Activity className="w-5 h-5 text-primary" />
-          </div>
-          <h1 className="text-xl font-bold text-white tracking-tight">Founder Console</h1>
-        </div>
-        <Button variant="ghost" size="sm" onClick={signOut} className="text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors">
-          <LogOut className="w-4 h-4 mr-2" />
-          Sign Out
-        </Button>
-      </header>
+      <DashboardHeader title="Admin Control Center" />
 
       <main className="flex-1 p-6 md:p-8 max-w-5xl mx-auto w-full grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1 space-y-6">

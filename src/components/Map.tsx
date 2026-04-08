@@ -18,6 +18,7 @@ interface BusData {
   id: string;
   driverId: string;
   driverName: string;
+  routeId?: string;
   location: { lat: number; lng: number };
   updatedAt: string;
   status: string;
@@ -40,6 +41,7 @@ interface MapProps {
   buses?: BusData[];
   center: { lat: number; lng: number };
   route?: Route | null;
+  polylinePoints?: [number, number][]; // Optional high-fidelity path
   userLocation?: { lat: number; lng: number } | null;
   focusKey?: number;
 }
@@ -57,14 +59,17 @@ function ChangeView({ center, focusKey = 0 }: { center: { lat: number; lng: numb
 }
 
 // Helper to fit bounds to a route
-function RouteFitter({ route }: { route: Route | null }) {
+function RouteFitter({ route, polylinePoints }: { route: Route | null; polylinePoints?: [number, number][] }) {
   const map = useMap();
   useEffect(() => {
-    if (route && route.stops.length > 0) {
+    if (polylinePoints && polylinePoints.length > 0) {
+      const bounds = L.latLngBounds(polylinePoints);
+      map.flyToBounds(bounds, { padding: [50, 50], duration: 1.5 });
+    } else if (route && route.stops.length > 0) {
       const bounds = L.latLngBounds(route.stops.map(s => [s.lat, s.lng]));
       map.flyToBounds(bounds, { padding: [50, 50], duration: 1.5 });
     }
-  }, [route, map]);
+  }, [route, polylinePoints, map]);
   return null;
 }
 
@@ -94,7 +99,7 @@ const createUserIcon = () => {
   });
 };
 
-export default function Map({ buses = [], center, route, userLocation, focusKey = 0 }: MapProps) {
+export default function Map({ buses = [], center, route, polylinePoints, userLocation, focusKey = 0 }: MapProps) {
   const markerRefs = useRef<{[key: string]: L.Marker}>({});
 
   useEffect(() => {
@@ -115,7 +120,7 @@ export default function Map({ buses = [], center, route, userLocation, focusKey 
       zoomControl={false}
     >
       <ChangeView center={center} focusKey={focusKey} />
-      <RouteFitter route={route || null} />
+      <RouteFitter route={route || null} polylinePoints={polylinePoints} />
       
       <TileLayer
         noWrap={true}
@@ -125,7 +130,7 @@ export default function Map({ buses = [], center, route, userLocation, focusKey 
 
       {route && (
         <Polyline 
-          positions={route.stops.map(s => [s.lat, s.lng])} 
+          positions={polylinePoints && polylinePoints.length > 0 ? polylinePoints : route.stops.map(s => [s.lat, s.lng])} 
           pathOptions={{ color: route.color || '#3b82f6', weight: 5, opacity: 0.8 }} 
         />
       )}
