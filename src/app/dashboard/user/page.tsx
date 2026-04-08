@@ -86,11 +86,11 @@ export default function UserDashboard() {
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>('locating');
   const [focusKey, setFocusKey] = useState(0);
   const [hasAutoCentered, setHasAutoCentered] = useState(false);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'search' | 'results' | 'map'>('search');
 
   const freshBuses = useMemo(
-    () => buses.filter((bus) => now - new Date(bus.updatedAt).getTime() <= STALE_BUS_MS),
+    () => buses.filter((bus) => now !== null && (now - new Date(bus.updatedAt).getTime()) <= STALE_BUS_MS),
     [buses, now]
   );
 
@@ -132,6 +132,7 @@ export default function UserDashboard() {
   }, [freshBuses, isWatching, selectedRouteMeta]);
 
   useEffect(() => {
+    setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
@@ -590,7 +591,7 @@ export default function UserDashboard() {
                             {insights.routeBuses.length} active buses
                           </span>
                           <span className="text-emerald-600">
-                            {insights.nearestBus ? getFreshnessText(insights.nearestBus.bus.updatedAt, now) : 'No buses online'}
+                            {insights.nearestBus ? (now ? getFreshnessText(insights.nearestBus.bus.updatedAt, now) : 'Live Now') : 'No buses online'}
                           </span>
                         </div>
                       </Card>
