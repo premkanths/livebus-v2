@@ -17,13 +17,13 @@ service cloud.firestore {
     function isAdmin() {
       return signedIn() &&
         currentUserDoc().exists() &&
-        currentUserDoc().data.role == 'admin';
+        currentUserDoc().data.role.trim().lower() == 'admin';
     }
 
     function hasRole(role) {
       return signedIn() &&
         currentUserDoc().exists() &&
-        currentUserDoc().data.role == role;
+        currentUserDoc().data.role.trim().lower() == role.lower();
     }
 
     // User Profiles: 
