@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { auth, db, googleProvider } from '@/lib/firebase';
 import { 
   signInWithEmailAndPassword, 
@@ -15,9 +15,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Bus, MapPin, Loader2, Chrome, SeparatorHorizontal } from 'lucide-react';
+import { Bus, MapPin, Loader2, Chrome } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
+import { useAuth } from '@/context/AuthContext';
+
+function dashboardPathForRole(role?: 'admin' | 'driver' | 'user') {
+  if (role === 'admin') return '/dashboard/admin';
+  if (role === 'driver') return '/dashboard/driver';
+  return '/dashboard/user';
+}
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
@@ -28,6 +35,13 @@ export default function LoginPage() {
   const [name, setName] = useState('');
   const router = useRouter();
   const { toast } = useToast();
+  const { user, profile, loading: authLoading } = useAuth();
+
+  useEffect(() => {
+    if (!authLoading && user && profile) {
+      router.replace(dashboardPathForRole(profile.role));
+    }
+  }, [authLoading, profile, router, user]);
 
   const handleGoogleLogin = async () => {
     setGoogleLoading(true);

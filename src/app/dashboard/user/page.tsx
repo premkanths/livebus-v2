@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
@@ -8,7 +10,7 @@ import dynamic from "next/dynamic";
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Bus, Map as MapIcon, ArrowDownUp, Crosshair, Loader2, MapPinned, MapPin, WifiOff, Clock3, Search, ListFilter, Activity, Star } from 'lucide-react';
+import { Bus, Map as MapIcon, ArrowDownUp, Crosshair, Loader2, MapPinned, MapPin, WifiOff, Clock3, Search, ListFilter, Activity, ChevronLeft, ChevronRight, GripVertical, Shield } from 'lucide-react';
 import { LocationSearchInput } from '@/components/LocationSearchInput';
 import { GeocodingResult } from '@/lib/geocoding';
 import { MatchingRoute, useRoutes } from '@/context/RouteContext';
@@ -16,6 +18,12 @@ import { DashboardHeader } from '@/components/DashboardHeader';
 import { fetchRoadFollowingRoute } from '@/lib/routing';
 import { RatingDialog } from '@/components/RatingDialog';
 import { requestNotificationPermission, sendLocalNotification } from '@/lib/notifications';
+import { RequireRole } from '@/components/RequireRole';
+import { RouteJourneyPanel } from '@/components/RouteJourneyPanel';
+import { buildSimulatedBuses, DemoBusConfig } from '@/lib/demo-buses';
+import { FeatureShowcaseGrid } from '@/components/FeatureShowcaseGrid';
+import { ShowcaseDrawer } from '@/components/ShowcaseDrawer';
+import { ArrowRight, LayoutGrid } from 'lucide-react';
 
 import { useToast } from '@/hooks/use-toast';
 
@@ -23,10 +31,12 @@ interface BusData {
   id: string;
   driverId: string;
   driverName: string;
+  vehicleNumber?: string;
   routeId?: string;
   location: { lat: number; lng: number };
   updatedAt: string;
   status: string;
+  isDemo?: boolean;
 }
 
 type GpsStatus = 'locating' | 'ready' | 'denied' | 'unsupported' | 'error';
@@ -57,11 +67,60 @@ function getFreshnessText(updatedAt: string, now: number) {
   return `updated ${ageMinutes}m ago`;
 }
 
-export default function UserDashboard() {
-  const { user: profile, signOut } = useAuth();
-  const { routes, findMatchingRoutes, loading: routesLoading } = useRoutes();
+function formatEta(minutes: number | null) {
+  if (minutes === null) return 'ETA unavailable';
+  if (minutes <= 1) return 'Arriving now';
+  return `${minutes} min`;
+}
+
+function getStopOffsetFromBoarding(routeMeta: MatchingRoute, stopTimeFromStart?: number) {
+  if (typeof stopTimeFromStart !== 'number') return '';
+  const boardingTime = routeMeta.sourceStop.timeFromStart || 0;
+  const offset = Math.max(0, stopTimeFromStart - boardingTime);
+  return offset === 0 ? 'Board' : `+${offset}m`;
+}
+
+function estimateArrivalMins(routeMeta: MatchingRoute, bus: BusData) {
+  const routeStops = routeMeta.route.stops;
+  const boardingIdx = routeStops.findIndex((stop) => stop.name === routeMeta.sourceStop.name);
+  if (boardingIdx === -1) return null;
+
+  let nearestStopIdx = -1;
+  let nearestStopDistance = Infinity;
+
+  routeStops.forEach((stop, idx) => {
+    const distance = getDistanceFromLatLonInKm(bus.location.lat, bus.location.lng, stop.lat, stop.lng);
+    if (distance < nearestStopDistance) {
+      nearestStopDistance = distance;
+      nearestStopIdx = idx;
+    }
+  });
+
+  if (nearestStopIdx === -1) return null;
+
+  const nearestStop = routeStops[nearestStopIdx];
+  const scheduledDelta =
+    (routeMeta.sourceStop.timeFromStart || 0) - (nearestStop.timeFromStart || 0);
+  const directDistanceToBoarding = getDistanceFromLatLonInKm(
+    bus.location.lat,
+    bus.location.lng,
+    routeMeta.sourceStop.lat,
+    routeMeta.sourceStop.lng
+  );
+
+  if (scheduledDelta >= 0) {
+    return Math.max(1, Math.round(scheduledDelta + nearestStopDistance * 3));
+  }
+
+  return Math.max(1, Math.round(directDistanceToBoarding * 3));
+}
+
+function UserDashboardContent() {
+  const { user, profile } = useAuth();
+  const { routes, findMatchingRoutes, findLenientMatchingRoutes, loading: routesLoading } = useRoutes();
   const { toast } = useToast();
   const [buses, setBuses] = useState<BusData[]>([]);
+  const [demoBusConfigs, setDemoBusConfigs] = useState<DemoBusConfig[]>([]);
   const [busesLoading, setBusesLoading] = useState(true);
   const [source, setSource] = useState<GeocodingResult | null>(null);
   const [dest, setDest] = useState<GeocodingResult | null>(null);
@@ -88,11 +147,81 @@ export default function UserDashboard() {
   const [hasAutoCentered, setHasAutoCentered] = useState(false);
   const [now, setNow] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'search' | 'results' | 'map'>('search');
+  const [showcaseOpen, setShowcaseOpen] = useState(false);
+  
+  // Layout Overhaul States
+  const [sidebarWidth, setSidebarWidth] = useState(1000);
+  const [searchPanelWidth, setSearchPanelWidth] = useState(400);
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(320);
+  const [journeyPanelWidth, setJourneyPanelWidth] = useState(430);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const [isResizingInner, setIsResizingInner] = useState(false);
+  const [isResizingRight, setIsResizingRight] = useState(false);
+  const [isResizingJourney, setIsResizingJourney] = useState(false);
+  
+  const sidebarRef = useRef<HTMLDivElement>(null);
 
-  const freshBuses = useMemo(
-    () => buses.filter((bus) => now !== null && (now - new Date(bus.updatedAt).getTime()) <= STALE_BUS_MS),
-    [buses, now]
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isResizing) {
+        const newWidth = e.clientX;
+        // Allow up to 2/3 of viewport
+        const maxWidth = window.innerWidth * 0.66;
+        if (newWidth > 320 && newWidth < maxWidth) {
+          setSidebarWidth(newWidth);
+        }
+      } else if (isResizingInner) {
+        const newWidth = e.clientX;
+        if (newWidth > 200 && newWidth < sidebarWidth - 100) {
+          setSearchPanelWidth(newWidth);
+        }
+      } else if (isResizingRight) {
+        const newWidth = window.innerWidth - e.clientX;
+        if (newWidth > 200 && newWidth < 600) {
+          setRightSidebarWidth(newWidth);
+        }
+      } else if (isResizingJourney) {
+        const newWidth = window.innerWidth - e.clientX - 24; // Account for right margin
+        if (newWidth > 320 && newWidth < 700) {
+          setJourneyPanelWidth(newWidth);
+        }
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      setIsResizingInner(false);
+      setIsResizingRight(false);
+      setIsResizingJourney(false);
+      document.body.style.cursor = 'default';
+    };
+
+    if (isResizing || isResizingInner || isResizingRight || isResizingJourney) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, isResizingInner, isResizingRight, isResizingJourney, sidebarWidth]);
+
+  const demoBuses = useMemo(
+    () => buildSimulatedBuses(demoBusConfigs, routes, now || Date.now()),
+    [demoBusConfigs, routes, now]
   );
+
+  const freshBuses = useMemo(() => {
+    const liveBuses = buses.filter(
+      (bus) => now !== null && (now - new Date(bus.updatedAt).getTime()) <= STALE_BUS_MS
+    );
+
+    return [...liveBuses, ...demoBuses];
+  }, [buses, demoBuses, now]);
 
   useEffect(() => {
     if (!isWatching || !selectedRouteMeta || freshBuses.length === 0) return;
@@ -123,7 +252,7 @@ export default function UserDashboard() {
         if (!notifiedBuses.current.has(bus.id)) {
           sendLocalNotification(
             "Bus Arriving Soon!",
-            `Bus ${bus.routeId} is ${boardingIdx - nearestStopIdx} stop(s) away from ${boardingStop.name}.`
+            `${bus.vehicleNumber || `Bus ${bus.routeId}`} is ${boardingIdx - nearestStopIdx} stop(s) away from ${boardingStop.name}.`
           );
           notifiedBuses.current.add(bus.id);
         }
@@ -139,17 +268,76 @@ export default function UserDashboard() {
 
   useEffect(() => {
     const q = query(collection(db, 'buses'), where('status', '==', 'active'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const busList: BusData[] = [];
-      snapshot.forEach((doc) => {
-        busList.push({ id: doc.id, ...doc.data() } as BusData);
-      });
-      setBuses(busList);
-      setBusesLoading(false);
-    });
+    const unsubscribe = onSnapshot(q, 
+      (snapshot) => {
+        const busList: BusData[] = [];
+        snapshot.forEach((doc) => {
+          busList.push({ id: doc.id, ...doc.data() } as BusData);
+        });
+        setBuses(busList);
+        setBusesLoading(false);
+      },
+      (error) => {
+        console.warn('Firestore buses listener failed:', error.message);
+        setBusesLoading(false);
+      }
+    );
 
     return () => unsubscribe();
   }, []);
+
+  // Initial search for Presidency University
+  useEffect(() => {
+    if (routes.length > 0 && !source && !dest) {
+      const presidencyCoords = { lat: 13.1704, lng: 77.5662 };
+      setDest({ displayName: "Presidency University", ...presidencyCoords });
+      const matches = findLenientMatchingRoutes(null, null, presidencyCoords.lat, presidencyCoords.lng, 8);
+      setMatchingRoutes(matches);
+    }
+  }, [routes.length]);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'demoBuses'), 
+      (snapshot) => {
+        const configs = snapshot.docs.map((demoDoc) => ({
+          id: demoDoc.id,
+          ...demoDoc.data(),
+        })) as DemoBusConfig[];
+
+        setDemoBusConfigs(configs);
+      },
+      (error) => {
+        console.warn('Firestore demoBuses listener failed:', error.message);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  // Handle deep-linking to a specific bus from All Buses page
+  const searchParams = useSearchParams();
+  const busIdParam = searchParams.get('bus');
+
+  useEffect(() => {
+    if (busIdParam && freshBuses.length > 0) {
+      const targetBus = freshBuses.find(b => b.id === busIdParam);
+      if (targetBus) {
+        setMapCenter(targetBus.location);
+        setFocusKey(prev => prev + 1);
+        setIsSidebarCollapsed(true); // Maximize map view
+        
+        // Find if this bus belongs to a route and select it
+        if (targetBus.routeId) {
+          const matchingRoute = routes.find(r => r.id === targetBus.routeId);
+          if (matchingRoute) {
+             const meta = findLenientMatchingRoutes(null, null, matchingRoute.stops[0].lat, matchingRoute.stops[0].lng, 1)
+               .find(m => m.route.id === targetBus.routeId);
+             if (meta) setSelectedRouteMeta(meta);
+          }
+        }
+      }
+    }
+  }, [busIdParam, freshBuses.length]);
 
   const tryIPFallback = async () => {
     try {
@@ -258,8 +446,14 @@ export default function UserDashboard() {
   };
 
   const handleSearch = () => {
-    if (!source || !dest) return;
-    const matches = findMatchingRoutes(source.lat, source.lng, dest.lat, dest.lng, 8);
+    if (!source && !dest) return;
+    const matches = findLenientMatchingRoutes(
+      source ? source.lat : null, 
+      source ? source.lng : null, 
+      dest ? dest.lat : null, 
+      dest ? dest.lng : null, 
+      8
+    );
     setMatchingRoutes(matches);
     setSelectedRouteMeta(null);
   };
@@ -295,8 +489,12 @@ export default function UserDashboard() {
           routeMeta.sourceStop.lat,
           routeMeta.sourceStop.lng
         ),
+        etaMins: estimateArrivalMins(routeMeta, bus),
       }))
-      .sort((a, b) => a.distanceKm - b.distanceKm)[0] || null;
+      .sort((a, b) => {
+        if (a.etaMins !== null && b.etaMins !== null) return a.etaMins - b.etaMins;
+        return a.distanceKm - b.distanceKm;
+      })[0] || null;
 
     return {
       routeBuses,
@@ -325,6 +523,51 @@ export default function UserDashboard() {
     ? freshBuses.filter((bus) => bus.routeId === selectedRouteMeta.route.id)
     : freshBuses;
 
+  const selectedTravelStops = useMemo(() => {
+    if (!selectedRouteMeta) return [];
+
+    const stops = selectedRouteMeta.route.stops;
+    const sourceIdx = stops.findIndex((stop) => stop.name === selectedRouteMeta.sourceStop.name);
+    const destIdx = stops.findIndex((stop) => stop.name === selectedRouteMeta.destStop.name);
+
+    if (sourceIdx === -1 || destIdx === -1 || sourceIdx > destIdx) return [];
+    return stops.slice(sourceIdx, destIdx + 1);
+  }, [selectedRouteMeta]);
+
+  const selectedInsights = selectedRouteMeta ? getRouteInsights(selectedRouteMeta) : null;
+  const nearestBusFreshness =
+    selectedInsights?.nearestBus && now
+      ? getFreshnessText(selectedInsights.nearestBus.bus.updatedAt, now)
+      : 'Live bus data unavailable';
+
+  const toggleWatching = async () => {
+    if (!isWatching) {
+      const granted = await requestNotificationPermission();
+      if (granted) {
+        setIsWatching(true);
+        toast({ title: "Alerts Enabled", description: "We'll notify you when the bus is 2 stops away." });
+      } else {
+        toast({ title: "Permission Denied", description: "Enable notifications in your browser settings.", variant: "destructive" });
+      }
+    } else {
+      setIsWatching(false);
+      notifiedBuses.current.clear();
+    }
+  };
+
+  const handleShareRoute = async () => {
+    if (!selectedRouteMeta || typeof navigator === 'undefined' || !navigator.share) return;
+
+    try {
+      await navigator.share({
+        title: `College Bus - ${selectedRouteMeta.route.name}`,
+        text: `Track ${selectedRouteMeta.sourceStop.name} to ${selectedRouteMeta.destStop.name} on route ${selectedRouteMeta.route.id}.`,
+      });
+    } catch {
+      // Ignore cancellations from the native share sheet.
+    }
+  };
+
   const gpsMessage = {
     locating: 'Trying to locate you...',
     ready: userLocation ? 'Your live location is visible on the map.' : 'Location found.',
@@ -334,16 +577,48 @@ export default function UserDashboard() {
   }[gpsStatus];
 
   return (
-    <div className="h-[100dvh] flex flex-col bg-background overflow-hidden relative">
+    <div className="h-[100dvh] flex flex-col bg-background overflow-hidden relative leading-relaxed font-outfit">
       <DashboardHeader title="Passenger Dashboard" />
+      <ShowcaseDrawer open={showcaseOpen} onOpenChange={setShowcaseOpen} />
       
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Fixed Toggle Button for Re-opening */}
+        {isSidebarCollapsed && (
+          <button 
+            onClick={() => setIsSidebarCollapsed(false)}
+            className="fixed left-0 top-1/2 -translate-y-1/2 z-[60] w-8 h-16 bg-white border border-zinc-200 rounded-r-2xl flex items-center justify-center shadow-2xl hover:bg-zinc-50 transition-all group active:scale-95"
+            title="Expand Panel"
+          >
+            <ChevronRight className="w-5 h-5 text-blue-600 transition-transform group-hover:scale-110" />
+          </button>
+        )}
+
         {/* Sidebar / Panels */}
-        <div className={`w-full md:w-[430px] h-full bg-white z-40 md:border-r shadow-2xl flex-col relative flex-shrink-0 ${activeTab === 'map' ? 'hidden md:flex' : 'flex'}`}>
-          
-          {/* SEARCH TAB CONTENT */}
-          <div className={`${activeTab === 'search' ? 'flex' : 'hidden md:flex'} flex-col h-full overflow-hidden`}>
-            <div className="p-4 bg-zinc-900 text-white shadow-md z-10 relative">
+        <div 
+          ref={sidebarRef}
+          style={{ width: isSidebarCollapsed ? '0px' : `${sidebarWidth}px` }}
+          className={`h-full bg-white z-40 relative flex-shrink-0 transition-all duration-300 ease-in-out border-r shadow-2xl flex flex-col ${isSidebarCollapsed ? 'overflow-hidden border-none shadow-none' : ''} ${activeTab === 'map' ? 'hidden md:flex' : 'flex'}`}
+        >
+          {/* Collapse Toggle Button (Inside edge when expanded) */}
+          {!isSidebarCollapsed && (
+            <button 
+              onClick={() => setIsSidebarCollapsed(true)}
+              className="absolute -right-4 top-1/2 -translate-y-1/2 z-[60] w-8 h-16 bg-white border border-zinc-200 rounded-full flex items-center justify-center shadow-lg hover:bg-zinc-50 transition-all group active:scale-95"
+              title="Collapse Panel"
+            >
+              <ChevronLeft className="w-5 h-5 text-zinc-400 transition-transform group-hover:scale-110" />
+            </button>
+          )}
+
+          {/* Horizontal Split Layout for Panels */}
+          <div className={`flex-1 flex h-full ${sidebarWidth > 700 ? 'flex-row' : 'flex-col'}`}>
+            
+            {/* LEFT / TOP HALF: SEARCH */}
+            <div 
+              style={{ width: (sidebarWidth > 700 && !isSidebarCollapsed) ? `${searchPanelWidth}px` : 'auto' }}
+              className={`flex flex-col h-full overflow-hidden flex-shrink-0 ${sidebarWidth > 700 ? 'border-r' : 'h-auto'}`}
+            >
+              <div className="p-4 bg-zinc-900 text-white shadow-md z-10 relative">
               <div className="text-xs uppercase tracking-widest text-zinc-400 font-bold mb-4 flex items-center gap-2">
                 <Activity className="w-3 h-3" />
                 Plan Your Trip
@@ -428,17 +703,31 @@ export default function UserDashboard() {
               </div>
             )}
 
+
             {/* Desktop Quick Links or Empty State */}
             <div className="hidden md:flex flex-1 overflow-y-auto bg-zinc-50 p-6 flex-col items-center justify-center text-center">
               {!source && !dest ? (
-                <div className="max-w-xs animate-in fade-in slide-in-from-bottom-4 duration-700">
-                  <div className="w-20 h-20 bg-emerald-100 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-sm">
-                    <Bus className="w-10 h-10 text-emerald-600" />
+                <div className="w-full space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                  <div className="mx-auto max-w-xs text-center">
+                    <div className="w-20 h-20 bg-emerald-100 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-sm">
+                      <Bus className="w-10 h-10 text-emerald-600" />
+                    </div>
+                    <h3 className="text-xl font-bold text-zinc-800 mb-2">Where to?</h3>
+                    <p className="text-zinc-500 leading-relaxed">
+                      Enter your source and destination to find the fastest bus routes and see live positions.
+                    </p>
                   </div>
-                  <h3 className="text-xl font-bold text-zinc-800 mb-2">Where to?</h3>
-                  <p className="text-zinc-500 leading-relaxed">
-                    Enter your source and destination to find the fastest bus routes and see live positions.
-                  </p>
+                  <div className="w-full rounded-[28px] border border-zinc-200 bg-white p-5 text-left shadow-sm">
+                    <div className="mb-4 flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-black text-zinc-900">Project Demo Screens</h4>
+                        <p className="mt-1 text-xs text-zinc-500">Open these during presentation to show future-ready features.</p>
+                      </div>
+                      <Link href="/dashboard/user/smart-pass" className="text-xs font-black text-blue-600">
+                        Open first
+                      </Link>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="w-full text-left space-y-4">
@@ -465,11 +754,21 @@ export default function UserDashboard() {
                 </div>
               )}
             </div>
-          </div>
+            </div>
 
-          {/* RESULTS TAB CONTENT */}
-          <div className={`${activeTab === 'results' ? 'flex' : 'hidden md:hidden'} flex-col h-full overflow-hidden bg-zinc-50`}>
-            <div className="p-4 bg-white border-b flex items-center justify-between sticky top-0 z-20">
+            {/* Middle Resize Handle */}
+            {sidebarWidth > 700 && !isSidebarCollapsed && (
+              <div
+                onMouseDown={() => setIsResizingInner(true)}
+                className="w-1.5 h-full z-40 cursor-col-resize hover:bg-blue-600/30 transition-colors flex items-center justify-center group flex-shrink-0"
+              >
+                <div className="w-[1px] h-10 bg-zinc-200 group-hover:bg-blue-600/50" />
+              </div>
+            )}
+
+            {/* RIGHT / BOTTOM HALF: RESULTS */}
+            <div className="flex flex-col h-full overflow-hidden bg-zinc-50 flex-1">
+              <div className="p-4 bg-white border-b flex items-center justify-between sticky top-0 z-20">
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setActiveTab('search')}>
                   <ArrowDownUp className="w-4 h-4 rotate-90" />
@@ -577,10 +876,15 @@ export default function UserDashboard() {
                               <Clock3 className="w-3.5 h-3.5 text-zinc-500" />
                             </div>
                             <div>
-                              <div className="text-[10px] font-bold text-zinc-400 uppercase leading-none mb-1">Next Bus</div>
+                              <div className="text-[10px] font-bold text-zinc-400 uppercase leading-none mb-1">Next Bus ETA</div>
                               <div className="font-black text-zinc-800 text-xs">
-                                {insights.nearestBus ? formatDistance(insights.nearestBus.distanceKm) : 'Offline'}
+                                {insights.nearestBus ? formatEta(insights.nearestBus.etaMins) : 'Offline'}
                               </div>
+                              {insights.nearestBus && (
+                                <div className="text-[10px] font-bold text-zinc-400 mt-0.5">
+                                  {formatDistance(insights.nearestBus.distanceKm)} away
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -591,7 +895,9 @@ export default function UserDashboard() {
                             {insights.routeBuses.length} active buses
                           </span>
                           <span className="text-emerald-600">
-                            {insights.nearestBus ? (now ? getFreshnessText(insights.nearestBus.bus.updatedAt, now) : 'Live Now') : 'No buses online'}
+                            {insights.nearestBus
+                              ? `${insights.nearestBus.bus.vehicleNumber || insights.nearestBus.bus.driverName} | ${now ? getFreshnessText(insights.nearestBus.bus.updatedAt, now) : 'Live Now'}`
+                              : 'No buses online'}
                           </span>
                         </div>
                       </Card>
@@ -601,10 +907,21 @@ export default function UserDashboard() {
               )}
             </div>
           </div>
+          </div>
         </div>
 
+        {/* RESIZE HANDLE (LEFT SIDEBAR) */}
+        {!isSidebarCollapsed && (
+          <div
+            onMouseDown={() => setIsResizing(true)}
+            className="w-1.5 h-full z-50 cursor-col-resize hover:bg-blue-600/30 transition-colors flex items-center justify-center group"
+          >
+            <div className="w-[1px] h-10 bg-zinc-200 group-hover:bg-blue-600/50" />
+          </div>
+        )}
+
         {/* MAP VIEW CONTENT */}
-        <main className={`flex-1 relative overflow-hidden bg-muted/20 h-full ${activeTab === 'map' ? 'block' : 'hidden md:block'}`}>
+        <main className="flex-1 relative overflow-hidden bg-muted/20 h-full">
           <div className="w-full h-full absolute inset-0 z-0">
             <DynamicMap
               buses={displayedBuses}
@@ -655,97 +972,160 @@ export default function UserDashboard() {
           </div>
 
           {/* Route Timeline Overlay */}
-          {selectedRouteMeta && (
-            <div className="hidden md:block absolute bottom-8 left-8 z-20 w-[380px] pointer-events-none animate-in slide-in-from-left-8 duration-500">
-              <Card className="p-6 bg-zinc-900/95 backdrop-blur-xl text-white shadow-[0_20px_50px_rgba(0,0,0,0.3)] border-zinc-800/50 pointer-events-auto rounded-3xl">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-3">
-                    <h3 className="font-black text-xs opacity-50 uppercase tracking-[0.2em]">Route Journey</h3>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className={`h-7 px-2 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all ${
-                        isWatching 
-                          ? 'bg-emerald-500 text-white hover:bg-emerald-600' 
-                          : 'bg-white/10 text-zinc-400 hover:bg-white/20'
-                      }`}
-                      onClick={async () => {
-                        if (!isWatching) {
-                          const granted = await requestNotificationPermission();
-                          if (granted) {
-                            setIsWatching(true);
-                            toast({ title: "Alerts Enabled", description: "We'll notify you when the bus is 2 stops away." });
-                          } else {
-                            toast({ title: "Permission Denied", description: "Enable notifications in your browser settings.", variant: "destructive" });
-                          }
-                        } else {
-                          setIsWatching(false);
-                          notifiedBuses.current.clear();
-                        }
-                      }}
-                    >
-                      <Activity className={`w-3 h-3 ${isWatching ? 'animate-pulse' : ''}`} />
-                      {isWatching ? 'Watching' : 'Watch Route'}
-                    </Button>
-                  </div>
-                  <div className="px-2 py-1 bg-white/10 rounded-lg text-[10px] font-bold">EXP-{selectedRouteMeta.route.id}</div>
+          {selectedRouteMeta && selectedInsights && (
+            <div 
+              style={{ width: `${journeyPanelWidth}px` }}
+              className="pointer-events-none absolute inset-y-6 right-6 z-20 hidden animate-in slide-in-from-right-8 duration-500 md:block"
+            >
+              {/* Resizer Handle for Journey Panel */}
+              <div
+                onMouseDown={() => setIsResizingJourney(true)}
+                className="pointer-events-auto absolute -left-2 top-1/2 -translate-y-1/2 w-4 h-24 z-50 cursor-col-resize flex items-center justify-center group"
+              >
+                <div className="w-1.5 h-16 bg-white/80 backdrop-blur shadow-md rounded-full border border-zinc-200 group-hover:bg-blue-600 transition-colors flex items-center justify-center">
+                  <div className="w-[1px] h-6 bg-zinc-300 group-hover:bg-blue-200" />
                 </div>
-                
-                <div className="flex flex-col gap-0 relative">
-                  <div className="absolute left-[7px] top-2 bottom-2 w-0.5 bg-gradient-to-b from-zinc-700 via-zinc-600 to-zinc-700"></div>
+              </div>
 
-                  <div className="flex items-start gap-5 pb-6">
-                    <div className="w-4 h-4 bg-zinc-600 rounded-full z-10 flex-shrink-0 mt-1 shadow-[0_0_10px_rgba(0,0,0,0.5)] border-2 border-zinc-900"></div>
-                    <div>
-                      <p className="text-sm font-black tracking-tight">Walk to {selectedRouteMeta.sourceStop.name}</p>
-                      <p className="text-[11px] font-bold text-zinc-400 mt-0.5 uppercase tracking-wide">
-                        Distance: {formatDistance(getRouteInsights(selectedRouteMeta).boardingDistanceKm)}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-start gap-5 py-2 pb-8">
-                    <div className="w-4 h-4 rounded-full z-10 flex-shrink-0 mt-1 ring-4 ring-zinc-900 shadow-lg" style={{ backgroundColor: selectedRouteMeta.route.color || '#3b82f6' }}></div>
-                    <div className="flex-1 bg-white/5 rounded-2xl p-4 border border-white/5">
-                      <div className="flex justify-between items-start mb-2">
-                        <div
-                          className="inline-flex px-2.5 py-1 rounded-lg text-[10px] font-black text-white uppercase tracking-wider"
-                          style={{ backgroundColor: selectedRouteMeta.route.color || '#3b82f6' }}
-                        >
-                          Board Bus
-                        </div>
-                        {getRouteInsights(selectedRouteMeta).nearestBus && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 text-[10px] font-black text-zinc-400 hover:text-white uppercase tracking-wider"
-                            onClick={() => {
-                              const bus = getRouteInsights(selectedRouteMeta).nearestBus?.bus;
-                              if (bus) setRatingTarget({ id: bus.driverId, name: bus.driverName });
-                            }}
-                          >
-                            <Star className="w-3 h-3 mr-1 fill-amber-400 text-amber-400" />
-                            Rate Driver
-                          </Button>
-                        )}
-                      </div>
-                      <p className="text-sm font-black tracking-tight leading-tight">Ride {selectedRouteMeta.stopsToTravel} stops</p>
-                      <p className="text-[11px] font-bold text-emerald-400 mt-1 uppercase tracking-wide">{selectedRouteMeta.estimatedDurationMins} mins travel time</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-start gap-5 pt-2">
-                    <div className="w-4 h-4 bg-red-500 rounded-full z-10 flex-shrink-0 mt-1 shadow-[0_0_10px_rgba(239,68,68,0.3)] border-2 border-zinc-900"></div>
-                    <div>
-                      <p className="text-sm font-black tracking-tight">Arrival at {selectedRouteMeta.destStop.name}</p>
-                      <p className="text-[11px] font-bold text-zinc-400 mt-0.5 uppercase tracking-wide">End of Trip</p>
-                    </div>
-                  </div>
-                </div>
-              </Card>
+              <RouteJourneyPanel
+                routeMeta={selectedRouteMeta}
+                travelStops={selectedTravelStops}
+                insights={selectedInsights}
+                isWatching={isWatching}
+                onToggleWatch={toggleWatching}
+                onRateDriver={() => {
+                  const bus = selectedInsights.nearestBus?.bus;
+                  if (bus) setRatingTarget({ id: bus.driverId, name: bus.driverName });
+                }}
+                formatDistance={formatDistance}
+                formatEta={formatEta}
+                getStopOffsetFromBoarding={getStopOffsetFromBoarding}
+                freshnessText={nearestBusFreshness}
+                onBack={() => setActiveTab('results')}
+                onShare={handleShareRoute}
+                className="pointer-events-auto h-full rounded-[32px]"
+              />
+            </div>
+          )}
+
+          {selectedRouteMeta && selectedInsights && (
+            <div className="absolute inset-x-0 bottom-0 z-20 animate-in slide-in-from-bottom-5 duration-300 md:hidden">
+              <RouteJourneyPanel
+                routeMeta={selectedRouteMeta}
+                travelStops={selectedTravelStops}
+                insights={selectedInsights}
+                isWatching={isWatching}
+                onToggleWatch={toggleWatching}
+                onRateDriver={() => {
+                  const bus = selectedInsights.nearestBus?.bus;
+                  if (bus) setRatingTarget({ id: bus.driverId, name: bus.driverName });
+                }}
+                formatDistance={formatDistance}
+                formatEta={formatEta}
+                getStopOffsetFromBoarding={getStopOffsetFromBoarding}
+                freshnessText={nearestBusFreshness}
+                onBack={() => setActiveTab('results')}
+                onShare={handleShareRoute}
+                className="rounded-t-[32px] border-x-0 border-b-0"
+                mobile
+              />
             </div>
           )}
         </main>
+
+        {/* RESIZE HANDLE (RIGHT SIDEBAR) */}
+        {!isRightSidebarCollapsed && (
+          <div
+            onMouseDown={() => setIsResizingRight(true)}
+            className="w-1.5 h-full z-50 cursor-col-resize hover:bg-blue-600/30 transition-colors flex items-center justify-center group"
+          >
+            <div className="w-[1px] h-10 bg-zinc-200 group-hover:bg-blue-600/50" />
+          </div>
+        )}
+
+        {/* RIGHT SIDEBAR: FEATURES (LITTLE LOWER) */}
+        <div 
+          style={{ width: isRightSidebarCollapsed ? '0px' : `${rightSidebarWidth}px` }}
+          className={`h-full bg-zinc-50 z-40 relative flex-shrink-0 transition-all duration-300 ease-in-out border-l shadow-2xl flex flex-col ${isRightSidebarCollapsed ? 'overflow-hidden border-none shadow-none' : ''}`}
+        >
+          {/* Collapse Button (Right Sidebar) */}
+          {!isRightSidebarCollapsed && (
+             <button 
+               onClick={() => setIsRightSidebarCollapsed(true)}
+               className="absolute -left-4 top-1/2 -translate-y-1/2 z-[60] w-8 h-16 bg-white border border-zinc-200 rounded-full flex items-center justify-center shadow-lg hover:bg-zinc-50 transition-all group active:scale-95"
+               title="Collapse Features"
+             >
+               <ChevronRight className="w-5 h-5 text-zinc-400 transition-transform group-hover:scale-110" />
+             </button>
+          )}
+
+          {/* Feature Content (Positioned Lower) */}
+          <div className="flex-1 overflow-y-auto pt-20">
+            <div className="px-4 pb-8 space-y-6">
+              <div className="bg-white rounded-[32px] p-6 shadow-sm border border-zinc-100">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="p-3 bg-blue-50 rounded-2xl">
+                    <Activity className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Quick Tools</h3>
+                    <p className="text-lg font-black text-zinc-900 leading-tight">Advanced Features</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <Link href="/dashboard/user/smart-pass" className="flex items-center gap-4 p-4 rounded-2xl bg-zinc-50 hover:bg-zinc-100 border border-zinc-100 transition-all group">
+                    <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
+                      <Shield className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-bold text-zinc-900 truncate tracking-tight">Smart Pass</h4>
+                      <p className="text-[10px] text-zinc-500 font-medium tracking-tight">Biometric bus authentication</p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-zinc-300" />
+                  </Link>
+
+                  <Link href="#" className="flex items-center gap-4 p-4 rounded-2xl bg-zinc-50 hover:bg-zinc-100 border border-zinc-100 transition-all group">
+                    <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
+                      <LayoutGrid className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-bold text-zinc-900 truncate tracking-tight">Campus Map</h4>
+                      <p className="text-[10px] text-zinc-500 font-medium tracking-tight">Detailed University navigation</p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-zinc-300" />
+                  </Link>
+                </div>
+              </div>
+
+              <div className="relative rounded-[32px] overflow-hidden bg-zinc-900 p-6 text-white shadow-xl">
+                 <div className="relative z-10">
+                    <h4 className="text-xs font-black uppercase tracking-[0.2em] text-blue-400 mb-2">Showcase</h4>
+                    <p className="text-lg font-bold leading-tight mb-4">Explore our thesis project capabilities.</p>
+                    <Button 
+                      variant="outline" 
+                      className="w-full rounded-xl bg-white/10 border-white/20 hover:bg-white/20 text-white font-bold border-none h-12"
+                      onClick={() => setShowcaseOpen(true)}
+                    >
+                      Open Full Showcase
+                    </Button>
+                 </div>
+                 <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/20 blur-[80px] -mr-16 -mt-16" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Fixed Toggle Button for Right Sidebar */}
+        {isRightSidebarCollapsed && (
+          <button 
+            onClick={() => setIsRightSidebarCollapsed(false)}
+            className="fixed right-0 top-1/2 -translate-y-1/2 z-[60] w-8 h-16 bg-white border border-zinc-200 rounded-l-2xl flex items-center justify-center shadow-2xl hover:bg-zinc-50 transition-all group active:scale-95"
+            title="Expand Features"
+          >
+            <ChevronLeft className="w-5 h-5 text-blue-600 transition-transform group-hover:scale-110" />
+          </button>
+        )}
       </div>
 
       <RatingDialog
@@ -753,7 +1133,7 @@ export default function UserDashboard() {
         onClose={() => setRatingTarget(null)}
         driverId={ratingTarget?.id || ''}
         driverName={ratingTarget?.name || ''}
-        passengerId={profile?.uid || ''}
+        passengerId={user?.uid || ''}
       />
       
       {/* Mobile Bottom Navigation */}
@@ -789,5 +1169,13 @@ export default function UserDashboard() {
         </button>
       </div>
     </div>
+  );
+}
+
+export default function UserDashboard() {
+  return (
+    <RequireRole allowedRoles={['user']}>
+      <UserDashboardContent />
+    </RequireRole>
   );
 }

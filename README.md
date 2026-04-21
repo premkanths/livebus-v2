@@ -1,25 +1,20 @@
 # LiveBus - Real-Time Transit Tracker
 
-LiveBus is a modern, real-time bus tracking application built with Next.js, Firebase, and Google Maps. It features separate dashboards for Drivers (to broadcast location) and Passengers (to view live movements).
+LiveBus is a real-time bus tracking web application built with Next.js, Firebase, Firestore, and Leaflet maps. It includes separate dashboards for passengers, drivers, and admins.
 
-## 🚀 Getting Started Locally
+Passengers can search for routes and view live bus locations. Drivers can broadcast their GPS position while driving. Admins can create, edit, and delete route stop sequences.
 
-### 1. Download and Extract
-Download the project ZIP from Firebase Studio and extract it to a folder on your computer.
+## Getting Started Locally
 
-### 2. Install Dependencies
+### 1. Install Dependencies
 Open your terminal in the project folder and run:
 ```bash
 npm install
 ```
 
-### 3. Configure Environment Variables
-Create a `.env.local` file in the root directory and fill in your credentials:
+### 2. Configure Environment Variables
+Create a `.env.local` file in the root directory and fill in your Firebase credentials:
 ```env
-# Google Maps
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_key
-
-# Firebase Configuration
 NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
 NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
 NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
@@ -28,13 +23,31 @@ NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
 NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
 ```
 
-### 4. Run Development Server
+In Firebase, enable Email/Password authentication. Enable Google sign-in only if you want the Google login button to work.
+
+### 3. Run Development Server
 ```bash
 npm run dev
 ```
-Open [http://localhost:9002](http://localhost:9002) to see the app.
+Open [http://localhost:3000](http://localhost:3000) to see the app.
 
-## 📤 Push to GitHub
+## App Roles
+
+- **Passenger**: search source/destination, view matching routes, and track active buses on the map.
+- **Driver**: select a route, start service, and publish live GPS location to Firestore.
+- **Admin**: manage bus route IDs, names, colors, and stop sequences.
+
+Admin access is assigned manually by setting a user's `role` field to `admin` in the Firestore `users` collection.
+
+## Useful Commands
+
+```bash
+npm run dev
+npm run typecheck
+npm run build
+```
+
+## Push to GitHub
 
 To send this project to your own GitHub repository, follow these steps:
 
@@ -49,9 +62,9 @@ git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
 git push -u origin main
 ```
 
-## 🏗 Tech Stack
+## Tech Stack
 - **Framework**: Next.js 15 (App Router)
 - **Database/Auth**: Firebase & Firestore
-- **Maps**: Google Maps JS API (@vis.gl/react-google-maps)
+- **Maps**: Leaflet + React Leaflet with OpenStreetMap tiles
 - **UI**: ShadCN UI + Tailwind CSS
 - **Icons**: Lucide React

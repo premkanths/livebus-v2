@@ -20,17 +20,29 @@ service cloud.firestore {
         currentUserDoc().data.role == 'admin';
     }
 
-    // User Profiles: Only the owner can read/write their own profile
+    function hasRole(role) {
+      return signedIn() &&
+        currentUserDoc().exists() &&
+        currentUserDoc().data.role == role;
+    }
+
+    // User Profiles: 
+    // - Authenticated users can list/read profiles (to see other drivers/users)
+    // - Admins can update any profile (for assignments)
+    // - Owners can update their own metadata (not role)
     match /users/{userId} {
-      allow read: if isOwner(userId);
+      allow get: if signedIn();
+      allow list: if isAdmin();
       allow create: if isOwner(userId)
         && request.resource.data.role in ['user', 'driver']
         && request.resource.data.email == request.auth.token.email;
-      allow update: if isOwner(userId)
-        && (
-          request.resource.data.role == resource.data.role ||
-          isAdmin()
-        );
+      allow update: if isAdmin() || (
+        isOwner(userId) &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.assignedRouteId == resource.data.assignedRouteId &&
+        request.resource.data.vehicleNumber == resource.data.vehicleNumber
+      );
+      allow delete: if isAdmin();
     }
     
     // Buses: 
@@ -41,12 +53,59 @@ service cloud.firestore {
       allow write: if signedIn() && request.auth.uid == busId;
     }
 
+    // Demo buses:
+    // - Any signed-in user can read demo buses for showcase mode.
+    // - Only admins can create, update, or delete them.
+    match /demoBuses/{busId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // Alerts:
+    // - Signed-in users can read alerts relevant to the live experience.
+    // - Drivers can broadcast alerts for their route.
+    // - Admins can manage or recall any alert.
+    match /alerts/{alertId} {
+      allow read: if signedIn();
+      allow create: if hasRole('driver');
+      allow update, delete: if isAdmin();
+    }
+
     // Routes:
     // - Any signed-in user can read routes.
     // - Only admins can create, update or delete routes.
     match /routes/{routeId} {
       allow read: if signedIn();
       allow write: if isAdmin();
+    }
+
+    // Ratings:
+    // - Passengers can create ratings for drivers.
+    // - Drivers can read ratings submitted for them.
+    // - Passengers can read their own submitted ratings.
+    // - Admins can read all ratings.
+    match /ratings/{ratingId} {
+      allow read: if isAdmin() ||
+        (signedIn() && resource.data.driverId == request.auth.uid) ||
+        (signedIn() && resource.data.passengerId == request.auth.uid);
+
+      allow create: if hasRole('user') &&
+        request.resource.data.keys().hasOnly([
+          'driverId',
+          'driverName',
+          'passengerId',
+          'rating',
+          'createdAt'
+        ]) &&
+        request.resource.data.passengerId == request.auth.uid &&
+        request.resource.data.driverId is string &&
+        request.resource.data.driverName is string &&
+        request.resource.data.rating is number &&
+        request.resource.data.rating >= 1 &&
+        request.resource.data.rating <= 5 &&
+        request.resource.data.createdAt is timestamp;
+
+      allow update, delete: if isAdmin();
     }
   }
 }

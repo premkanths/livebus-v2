@@ -15,11 +15,13 @@ export default function Home() {
       if (!user) {
         router.push('/login');
       } else if (profile) {
-        if (profile.role === 'driver') {
-          router.push('/dashboard/driver');
-        } else {
-          router.push('/dashboard/user');
-        }
+        const dashboardPath =
+          profile.role === 'admin'
+            ? '/dashboard/admin'
+            : profile.role === 'driver'
+              ? '/dashboard/driver'
+              : '/dashboard/user';
+        router.push(dashboardPath);
       }
     }
   }, [user, profile, loading, router]);

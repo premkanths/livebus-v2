@@ -18,10 +18,12 @@ interface BusData {
   id: string;
   driverId: string;
   driverName: string;
+  vehicleNumber?: string;
   routeId?: string;
   location: { lat: number; lng: number };
   updatedAt: string;
   status: string;
+  isDemo?: boolean;
 }
 
 interface Stop {
@@ -185,10 +187,13 @@ export default function Map({ buses = [], center, route, polylinePoints, userLoc
         >
            <Popup>
              <div className="p-1 min-w-[120px]">
-               <h3 className="font-bold text-sm !m-0 !mb-1 text-blue-600">{bus.driverName}</h3>
+               <h3 className="font-bold text-sm !m-0 !mb-1 text-blue-600">{bus.vehicleNumber || bus.driverName}</h3>
+               {bus.vehicleNumber && (
+                 <p className="text-[10px] text-gray-600 !m-0 !mb-1">Driver: {bus.driverName}</p>
+               )}
                <div className="flex items-center gap-1 text-[10px] text-gray-500 !m-0 !mt-1">
-                 <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse mr-1"></span>
-                 Live Now
+                 <span className={`inline-block w-2 h-2 rounded-full animate-pulse mr-1 ${bus.isDemo ? 'bg-amber-500' : 'bg-green-500'}`}></span>
+                 {bus.isDemo ? 'Demo Auto Ride' : 'Live Now'}
                </div>
                <p className="text-[10px] text-gray-500 !m-0 !mt-1">
                  Last seen: {new Date(bus.updatedAt).toLocaleTimeString()}
