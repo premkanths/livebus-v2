@@ -75,6 +75,28 @@ function RouteFitter({ route, polylinePoints }: { route: Route | null; polylineP
   return null;
 }
 
+// Helper to fix Leaflet "gray area" / missing tiles on resize or layout changes
+function MapResizer() {
+  const map = useMap();
+  useEffect(() => {
+    // Initial delay to ensure DOM is settled and animations (if any) finished
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 400);
+
+    const handleResize = () => {
+      map.invalidateSize();
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [map]);
+  return null;
+}
+
 // Helper to create a custom divIcon with Lucide Icon (Bus)
 const createCustomIcon = () => {
   return L.divIcon({
@@ -121,6 +143,7 @@ export default function Map({ buses = [], center, route, polylinePoints, userLoc
       style={{ height: "100%", width: "100%", zIndex: 0 }}
       zoomControl={false}
     >
+      <MapResizer />
       <ChangeView center={center} focusKey={focusKey} />
       <RouteFitter route={route || null} polylinePoints={polylinePoints} />
       
