@@ -149,9 +149,9 @@ function UserDashboardContent() {
   const [activeTab, setActiveTab] = useState<'search' | 'results' | 'map'>('search');
   const [showcaseOpen, setShowcaseOpen] = useState(false);
   
-  // Layout Overhaul States
-  const [sidebarWidth, setSidebarWidth] = useState(1000);
-  const [searchPanelWidth, setSearchPanelWidth] = useState(400);
+  // Layout Overhaul States - Default to reasonable values
+  const [sidebarWidth, setSidebarWidth] = useState(450);
+  const [searchPanelWidth, setSearchPanelWidth] = useState(450);
   const [rightSidebarWidth, setRightSidebarWidth] = useState(320);
   const [journeyPanelWidth, setJourneyPanelWidth] = useState(430);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -160,8 +160,21 @@ function UserDashboardContent() {
   const [isResizingInner, setIsResizingInner] = useState(false);
   const [isResizingRight, setIsResizingRight] = useState(false);
   const [isResizingJourney, setIsResizingJourney] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  
+  const [isDesktopLarge, setIsDesktopLarge] = useState(true);
   
   const sidebarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+      setIsDesktopLarge(window.innerWidth >= 1280);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -596,7 +609,7 @@ function UserDashboardContent() {
         {/* Sidebar / Panels */}
         <div 
           ref={sidebarRef}
-          style={{ width: isSidebarCollapsed ? '0px' : `${sidebarWidth}px` }}
+          style={{ width: isMobile ? '100%' : (isSidebarCollapsed ? '0px' : `${sidebarWidth}px`) }}
           className={`h-full bg-white z-40 relative flex-shrink-0 transition-all duration-300 ease-in-out border-r shadow-2xl flex flex-col ${isSidebarCollapsed ? 'overflow-hidden border-none shadow-none' : ''} ${activeTab === 'map' ? 'hidden md:flex' : 'flex'}`}
         >
           {/* Collapse Toggle Button (Inside edge when expanded) */}
@@ -610,13 +623,12 @@ function UserDashboardContent() {
             </button>
           )}
 
-          {/* Horizontal Split Layout for Panels */}
-          <div className={`flex-1 flex h-full ${sidebarWidth > 700 ? 'flex-row' : 'flex-col'}`}>
+          {/* Layout for Panels */}
+          <div className={`flex-1 flex h-full flex-col`}>
             
-            {/* LEFT / TOP HALF: SEARCH */}
+            {/* SEARCH PANEL */}
             <div 
-              style={{ width: (sidebarWidth > 700 && !isSidebarCollapsed) ? `${searchPanelWidth}px` : 'auto' }}
-              className={`flex flex-col h-full overflow-hidden flex-shrink-0 ${sidebarWidth > 700 ? 'border-r' : 'h-auto'}`}
+              className={`flex flex-col h-auto overflow-hidden flex-shrink-0 border-b`}
             >
               <div className="p-4 bg-zinc-900 text-white shadow-md z-10 relative">
               <div className="text-xs uppercase tracking-widest text-zinc-400 font-bold mb-4 flex items-center gap-2">
@@ -756,15 +768,7 @@ function UserDashboardContent() {
             </div>
             </div>
 
-            {/* Middle Resize Handle */}
-            {sidebarWidth > 700 && !isSidebarCollapsed && (
-              <div
-                onMouseDown={() => setIsResizingInner(true)}
-                className="w-1.5 h-full z-40 cursor-col-resize hover:bg-blue-600/30 transition-colors flex items-center justify-center group flex-shrink-0"
-              >
-                <div className="w-[1px] h-10 bg-zinc-200 group-hover:bg-blue-600/50" />
-              </div>
-            )}
+            {/* Removed Inner Resize Handle */}
 
             {/* RIGHT / BOTTOM HALF: RESULTS */}
             <div className="flex flex-col h-full overflow-hidden bg-zinc-50 flex-1">
@@ -1043,10 +1047,10 @@ function UserDashboardContent() {
           </div>
         )}
 
-        {/* RIGHT SIDEBAR: FEATURES (LITTLE LOWER) */}
+        {/* RIGHT SIDEBAR: FEATURES */}
         <div 
-          style={{ width: isRightSidebarCollapsed ? '0px' : `${rightSidebarWidth}px` }}
-          className={`h-full bg-zinc-50 z-40 relative flex-shrink-0 transition-all duration-300 ease-in-out border-l shadow-2xl flex flex-col ${isRightSidebarCollapsed ? 'overflow-hidden border-none shadow-none' : ''}`}
+          style={{ width: !isDesktopLarge ? '0px' : (isRightSidebarCollapsed ? '0px' : `${rightSidebarWidth}px`) }}
+          className={`h-full bg-zinc-50 z-40 relative flex-shrink-0 transition-all duration-300 ease-in-out border-l shadow-2xl flex flex-col ${isRightSidebarCollapsed || !isDesktopLarge ? 'overflow-hidden border-none shadow-none' : ''}`}
         >
           {/* Collapse Button (Right Sidebar) */}
           {!isRightSidebarCollapsed && (

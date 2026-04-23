@@ -78,19 +78,33 @@ function RouteFitter({ route, polylinePoints }: { route: Route | null; polylineP
 // Helper to fix Leaflet "gray area" / missing tiles on resize or layout changes
 function MapResizer() {
   const map = useMap();
-  useEffect(() => {
-    // Initial delay to ensure DOM is settled and animations (if any) finished
-    const timer = setTimeout(() => {
-      map.invalidateSize();
-    }, 400);
+  const containerRef = useRef<HTMLElement | null>(null);
 
+  useEffect(() => {
+    containerRef.current = map.getContainer();
+    if (!containerRef.current) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      // Small delay to ensure the container has settled after CSS transitions
+      setTimeout(() => {
+        map.invalidateSize();
+      }, 50);
+    });
+
+    resizeObserver.observe(containerRef.current);
+
+    // Also keep the window resize listener as a fallback
     const handleResize = () => {
       map.invalidateSize();
     };
 
     window.addEventListener('resize', handleResize);
+    
+    // Initial invalidation
+    map.invalidateSize();
+
     return () => {
-      clearTimeout(timer);
+      resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
     };
   }, [map]);

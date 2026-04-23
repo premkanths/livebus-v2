@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
-import { Search, MapPin, Loader2 } from "lucide-react";
+import { Search, MapPin, Loader2, Bus } from "lucide-react";
 import { geocodeSearch, GeocodingResult } from "@/lib/geocoding";
 import { Card } from "@/components/ui/card";
+import { useRoutes } from "@/context/RouteContext";
 
 interface LocationSearchInputProps {
   placeholder: string;
@@ -17,6 +18,7 @@ export function LocationSearchInput({ placeholder, onLocationSelect, icon }: Loc
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [selectedValue, setSelectedValue] = useState<GeocodingResult | null>(null);
   
+  const { routes } = useRoutes();
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Click outside to close dropdown
@@ -42,8 +44,29 @@ export function LocationSearchInput({ placeholder, onLocationSelect, icon }: Loc
 
     const timer = setTimeout(async () => {
       setIsLoading(true);
-      const data = await geocodeSearch(query);
-      setResults(data);
+      
+      // 1. Search Local Stops first
+      const localResults: GeocodingResult[] = [];
+      const seenNames = new Set<string>();
+      
+      routes.forEach(route => {
+        route.stops.forEach(stop => {
+          if (stop.name.toLowerCase().includes(query.toLowerCase()) && !seenNames.has(stop.name)) {
+            localResults.push({
+              lat: stop.lat,
+              lng: stop.lng,
+              displayName: `${stop.name}, (Local Stop)`,
+            });
+            seenNames.add(stop.name);
+          }
+        });
+      });
+
+      // 2. Search OSM
+      const osmData = await geocodeSearch(query);
+      
+      // Combine results, prioritizing local
+      setResults([...localResults, ...osmData.filter(o => !seenNames.has(o.displayName.split(',')[0]))]);
       setIsDropdownOpen(true);
       setIsLoading(false);
     }, 600);
@@ -106,11 +129,24 @@ export function LocationSearchInput({ placeholder, onLocationSelect, icon }: Loc
           {results.map((r, idx) => (
             <button
               key={idx}
-              className="text-left px-3 py-2 text-sm hover:bg-zinc-100 rounded-sm transition-colors"
+              className="text-left px-3 py-2 text-sm hover:bg-zinc-100 rounded-sm transition-colors flex items-center gap-3 w-full"
               onClick={() => handleSelect(r)}
             >
-              <div className="font-bold text-zinc-900">{r.displayName.split(",")[0]}</div>
-              <div className="text-xs text-zinc-500 truncate">{r.displayName}</div>
+              <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-zinc-50 flex items-center justify-center border border-zinc-100">
+                {r.displayName.includes("(Local Stop)") ? (
+                  <Bus className="w-4 h-4 text-emerald-600" />
+                ) : (
+                  <MapPin className="w-4 h-4 text-zinc-400" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-zinc-900 truncate">
+                  {r.displayName.split(",")[0]}
+                </div>
+                <div className="text-[10px] text-zinc-500 truncate">
+                  {r.displayName.replace(", (Local Stop)", "")}
+                </div>
+              </div>
             </button>
           ))}
         </Card>
