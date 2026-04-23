@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
@@ -10,20 +8,34 @@ import dynamic from "next/dynamic";
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Bus, Map as MapIcon, ArrowDownUp, Crosshair, Loader2, MapPinned, MapPin, WifiOff, Clock3, Search, ListFilter, Activity, ChevronLeft, ChevronRight, GripVertical, Shield, ArrowRight, LayoutGrid } from 'lucide-react';
+import { 
+  Bus, 
+  Map as MapIcon, 
+  ArrowDownUp, 
+  Crosshair, 
+  WifiOff, 
+  Clock3, 
+  Search, 
+  ListFilter, 
+  ChevronLeft, 
+  ArrowRight, 
+  LayoutGrid, 
+  Activity,
+  ShieldCheck,
+  CreditCard,
+  MapPinned
+} from 'lucide-react';
 import { LocationSearchInput } from '@/components/LocationSearchInput';
 import { GeocodingResult } from '@/lib/geocoding';
 import { MatchingRoute, useRoutes } from '@/context/RouteContext';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { fetchRoadFollowingRoute } from '@/lib/routing';
 import { RatingDialog } from '@/components/RatingDialog';
-import { requestNotificationPermission, sendLocalNotification } from '@/lib/notifications';
+import { requestNotificationPermission } from '@/lib/notifications';
 import { RequireRole } from '@/components/RequireRole';
 import { RouteJourneyPanel } from '@/components/RouteJourneyPanel';
 import { buildSimulatedBuses, DemoBusConfig } from '@/lib/demo-buses';
-import { FeatureShowcaseGrid } from '@/components/FeatureShowcaseGrid';
 import { ShowcaseDrawer } from '@/components/ShowcaseDrawer';
-
 import { useToast } from '@/hooks/use-toast';
 
 interface BusData {
@@ -106,7 +118,7 @@ function estimateArrivalMins(routeMeta: MatchingRoute, bus: BusData) {
 }
 
 function UserDashboardContent() {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const { routes, findLenientMatchingRoutes, loading: routesLoading } = useRoutes();
   const { toast } = useToast();
   const [buses, setBuses] = useState<BusData[]>([]);
@@ -123,7 +135,6 @@ function UserDashboardContent() {
   const notifiedBuses = useRef<Set<string>>(new Set());
 
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [isLocating, setIsLocating] = useState(false);
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>('locating');
   const [focusKey, setFocusKey] = useState(0);
   const [hasAutoCentered, setHasAutoCentered] = useState(false);
@@ -132,6 +143,7 @@ function UserDashboardContent() {
   const [showcaseOpen, setShowcaseOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isResultsPanelOpen, setIsResultsPanelOpen] = useState(false);
+  const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 1024);
@@ -148,12 +160,13 @@ function UserDashboardContent() {
     }
   }, [selectedRouteMeta]);
 
+  // Force map resize whenever panels change
   useEffect(() => {
     const timer = setTimeout(() => {
       window.dispatchEvent(new Event('resize'));
     }, 400);
     return () => clearTimeout(timer);
-  }, [activeTab, isResultsPanelOpen, selectedRouteMeta]);
+  }, [activeTab, isResultsPanelOpen, selectedRouteMeta, isRightSidebarCollapsed]);
 
   const demoBuses = useMemo(
     () => buildSimulatedBuses(demoBusConfigs, routes, now || Date.now()),
@@ -277,9 +290,9 @@ function UserDashboardContent() {
       <DashboardHeader title="Passenger Dashboard" />
       <ShowcaseDrawer open={showcaseOpen} onOpenChange={setShowcaseOpen} />
 
-      <main className="flex-1 relative overflow-hidden">
-        {/* BACKGROUND MAP */}
-        <div className="absolute inset-0 z-0">
+      <main className="flex-1 flex overflow-hidden relative">
+        {/* BACKGROUND MAP - Now filling the flexible center space */}
+        <div className="flex-1 relative z-0">
           <DynamicMap
             buses={displayedBuses}
             center={mapCenter}
@@ -288,76 +301,67 @@ function UserDashboardContent() {
             userLocation={userLocation}
             focusKey={focusKey}
           />
-        </div>
-
-        {/* TOP LEFT SEARCH CARD */}
-        <div className={`absolute top-4 left-4 right-4 lg:right-auto lg:w-[420px] z-30 transition-all duration-500 transform ${isMobile && activeTab !== 'search' ? '-translate-y-full opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}>
-          <Card className="p-5 shadow-2xl border-white/20 bg-white/90 backdrop-blur-xl rounded-[28px] border">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-8 h-8 rounded-xl bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-200">
-                <Search className="w-4 h-4 text-white" />
+          
+          {/* FLOATING STATUS CARD (TOP LEFT) */}
+          <div className="absolute top-4 left-4 z-10 hidden md:block">
+            <Card className="p-4 bg-white/90 backdrop-blur shadow-xl border-white/20 rounded-3xl w-64">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Live System Status</span>
               </div>
-              <h2 className="font-black text-zinc-900 tracking-tight uppercase text-xs">Plan Your Journey</h2>
-            </div>
-
-            <div className="space-y-3 relative">
-              <div className="absolute left-[18px] top-6 bottom-6 w-[2px] bg-zinc-200/50 border-l border-dashed border-zinc-300"></div>
-              <LocationSearchInput placeholder="From where?" onLocationSelect={setSource} />
-              <LocationSearchInput placeholder="To where?" onLocationSelect={setDest} />
-              <Button 
-                variant="ghost" size="icon" 
-                className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-white shadow-md border hover:bg-zinc-50 rounded-full w-8 h-8"
-                onClick={() => { const s = source; setSource(dest); setDest(s); }}
-              >
-                <ArrowDownUp className="w-4 h-4 text-zinc-400" />
-              </Button>
-            </div>
-
-            <div className="mt-4 flex items-center gap-3 p-3 rounded-2xl bg-zinc-50 border border-zinc-100/50">
-              <div className={`w-2 h-2 rounded-full ${gpsStatus === 'ready' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'}`} />
-              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest truncate">{gpsMessage}</span>
-              <Button variant="ghost" size="sm" className="ml-auto h-7 text-[10px] font-black uppercase text-blue-600 px-2" onClick={() => setHasAutoCentered(false)}>Recenter</Button>
-            </div>
-
-            <Button
-              className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black h-12 rounded-2xl shadow-lg shadow-emerald-200 transition-all active:scale-[0.98]"
-              onClick={handleSearch}
-              disabled={!source || !dest}
-            >
-              Search Live Buses
-            </Button>
-          </Card>
+              <p className="text-sm font-black text-zinc-900 leading-tight">
+                {gpsMessage}
+              </p>
+              <div className="mt-2 flex items-center gap-2 text-[10px] font-bold text-zinc-400">
+                <Activity className="w-3 h-3" />
+                Tracking {freshBuses.length} fresh buses
+              </div>
+            </Card>
+          </div>
         </div>
 
-        {/* SLIDING RESULTS PANEL */}
-        <div className={`absolute transition-all duration-500 z-40 ${
-          isMobile 
-            ? `inset-x-0 bottom-0 bg-white rounded-t-[40px] shadow-[0_-20px_50px_rgba(0,0,0,0.1)] border-t transform ${activeTab === 'results' ? 'translate-y-0 h-[70vh]' : 'translate-y-full h-0'}`
-            : `top-4 bottom-4 left-4 w-[420px] bg-white/95 backdrop-blur-xl rounded-[32px] shadow-2xl border border-white/20 transform ${isResultsPanelOpen ? 'translate-x-0' : '-translate-x-[110%]'}`
-        }`}>
-          <div className="h-full flex flex-col">
-            <div className="p-6 flex items-center justify-between border-b shrink-0">
-              <div className="flex items-center gap-3">
-                <Button variant="ghost" size="icon" className="rounded-xl" onClick={() => { setIsResultsPanelOpen(false); if (isMobile) setActiveTab('search'); }}>
-                  <ChevronLeft className="w-5 h-5" />
+        {/* LEFT SEARCH PANEL - Using a sidebar-like behavior for better map sizing */}
+        <div className={`transition-all duration-500 overflow-hidden bg-white border-r z-20 flex flex-col ${isMobile ? 'hidden' : (source || dest ? 'w-[420px]' : 'w-[420px]')}`}>
+           <div className="p-6 space-y-6">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-200">
+                  <Search className="w-4 h-4 text-white" />
+                </div>
+                <h2 className="font-black text-zinc-900 tracking-tight uppercase text-xs">Plan Your Journey</h2>
+              </div>
+
+              <div className="space-y-3 relative">
+                <div className="absolute left-[18px] top-6 bottom-6 w-[2px] bg-zinc-200/50 border-l border-dashed border-zinc-300"></div>
+                <LocationSearchInput placeholder="From where?" onLocationSelect={setSource} />
+                <LocationSearchInput placeholder="To where?" onLocationSelect={setDest} />
+                <Button 
+                  variant="ghost" size="icon" 
+                  className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-white shadow-md border hover:bg-zinc-50 rounded-full w-8 h-8"
+                  onClick={() => { const s = source; setSource(dest); setDest(s); }}
+                >
+                  <ArrowDownUp className="w-4 h-4 text-zinc-400" />
                 </Button>
-                <h2 className="font-black text-xl text-zinc-900 tracking-tight">Available Routes</h2>
               </div>
-              <span className="bg-zinc-100 text-zinc-500 text-[10px] font-black px-2.5 py-1 rounded-lg border uppercase">{matchingRoutes.length} found</span>
-            </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
+              <Button
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black h-12 rounded-2xl shadow-lg shadow-emerald-200 transition-all active:scale-[0.98]"
+                onClick={handleSearch}
+                disabled={!source || !dest}
+              >
+                Find Live Buses
+              </Button>
+           </div>
+           
+           {/* Results list inside the left panel */}
+           <div className="flex-1 overflow-y-auto border-t bg-zinc-50/50 p-4 space-y-4 no-scrollbar">
               {(routesLoading || busesLoading) ? (
                 <div className="space-y-4">
                   {[1,2,3].map(i => <Skeleton key={i} className="h-32 w-full rounded-3xl" />)}
                 </div>
               ) : matchingRoutes.length === 0 ? (
-                <div className="text-center py-20 px-6">
-                  <div className="w-20 h-20 bg-zinc-50 rounded-[30px] flex items-center justify-center mx-auto mb-6 border">
-                    <WifiOff className="w-8 h-8 text-zinc-300" />
-                  </div>
-                  <h3 className="font-black text-xl text-zinc-800">No direct buses</h3>
-                  <p className="text-zinc-500 mt-2 text-sm">We couldn't find a direct route. Try different stops.</p>
+                <div className="text-center py-10">
+                  <WifiOff className="w-10 h-10 text-zinc-300 mx-auto mb-4" />
+                  <p className="text-sm font-bold text-zinc-400">Search to see routes</p>
                 </div>
               ) : (
                 matchingRoutes.map(meta => {
@@ -366,72 +370,102 @@ function UserDashboardContent() {
                   return (
                     <Card 
                       key={meta.route.id} 
-                      className={`p-5 cursor-pointer rounded-3xl border-2 transition-all hover:shadow-xl group ${active ? 'border-emerald-500 bg-emerald-50/50 ring-4 ring-emerald-500/10' : 'border-zinc-100 hover:border-zinc-200'}`}
+                      className={`p-5 cursor-pointer rounded-3xl border-2 transition-all hover:shadow-xl group ${active ? 'border-emerald-500 bg-white ring-4 ring-emerald-500/10' : 'border-zinc-100 hover:border-zinc-200 bg-white'}`}
                       onClick={() => handleRouteSelect(meta)}
                     >
                       <div className="flex justify-between items-start mb-4">
                         <div className="px-3 py-1.5 rounded-xl text-[10px] font-black text-white shadow-sm tracking-widest uppercase" style={{ backgroundColor: meta.route.color }}>
                           Route {meta.route.id}
                         </div>
-                        <div className="text-right">
-                          <span className="text-lg font-black text-zinc-900">{meta.estimatedDurationMins}m</span>
-                        </div>
+                        <span className="text-lg font-black text-zinc-900">{meta.estimatedDurationMins}m</span>
                       </div>
-                      <div className="flex items-center gap-3 py-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-bold text-sm text-zinc-800 truncate">{meta.sourceStop.name}</p>
-                          <p className="text-[10px] text-zinc-400 font-bold uppercase">Boarding</p>
-                        </div>
-                        <ArrowRight className="w-4 h-4 text-zinc-300" />
-                        <div className="flex-1 min-w-0 text-right">
-                          <p className="font-bold text-sm text-zinc-800 truncate">{meta.destStop.name}</p>
-                          <p className="text-[10px] text-zinc-400 font-bold uppercase">Destination</p>
-                        </div>
-                      </div>
-                      <div className="mt-4 pt-4 border-t flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center border border-emerald-100">
-                            <Bus className="w-4 h-4 text-emerald-600" />
-                          </div>
-                          <p className="text-xs font-bold text-emerald-600">{insights.routeBuses.length} Live</p>
-                        </div>
-                        {insights.nearestBus && (
-                          <div className="flex items-center gap-2">
-                            <p className="text-xs font-bold text-zinc-800">{formatEta(insights.nearestBus.etaMins)}</p>
-                            <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center border border-blue-100">
-                              <Clock3 className="w-4 h-4 text-blue-600" />
-                            </div>
-                          </div>
-                        )}
+                      <div className="flex items-center gap-3 py-2 text-xs font-bold text-zinc-600">
+                        <span className="truncate">{meta.sourceStop.name}</span>
+                        <ArrowRight className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{meta.destStop.name}</span>
                       </div>
                     </Card>
                   );
                 })
               )}
-            </div>
-          </div>
+           </div>
         </div>
 
-        {/* FLOATING ACTION BUTTONS */}
-        <div className="absolute right-6 bottom-24 lg:bottom-10 z-30 flex flex-col gap-3">
+        {/* RIGHT SIDEBAR - As seen in the screenshot */}
+        <div className={`transition-all duration-500 bg-white border-l z-20 flex flex-col ${isMobile ? 'hidden' : (isRightSidebarCollapsed ? 'w-0' : 'w-[320px]')}`}>
+          <div className="p-6 flex-1 overflow-y-auto no-scrollbar">
+            <div className="space-y-6">
+              {/* Advanced Features Card */}
+              <Card className="rounded-[32px] p-6 bg-white border border-zinc-100 shadow-sm">
+                <div className="flex items-center gap-2 mb-6">
+                  <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center">
+                    <Activity className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Quick Tools</p>
+                    <h3 className="text-lg font-black text-zinc-900 tracking-tight">Advanced Features</h3>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  {[
+                    { title: "Smart Pass", desc: "Biometric bus authentication", icon: CreditCard },
+                    { title: "Campus Map", desc: "Detailed University navigation", icon: MapPinned },
+                  ].map((item, i) => (
+                    <div key={i} className="flex items-center gap-4 p-3 rounded-2xl hover:bg-zinc-50 transition-all group cursor-pointer border border-transparent hover:border-zinc-100">
+                      <div className="w-10 h-10 rounded-xl bg-zinc-50 flex items-center justify-center text-zinc-400 group-hover:text-blue-600 transition-all">
+                        <item.icon className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-black text-zinc-800">{item.title}</p>
+                        <p className="text-[10px] font-medium text-zinc-400">{item.desc}</p>
+                      </div>
+                      <ChevronLeft className="w-4 h-4 text-zinc-300 rotate-180 group-hover:translate-x-1 transition-transform" />
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              {/* Showcase Card */}
+              <Card className="rounded-[32px] p-6 bg-zinc-900 text-white shadow-2xl relative overflow-hidden group">
+                <div className="relative z-10">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50 mb-2">Showcase</p>
+                  <h3 className="text-lg font-black leading-tight mb-6">Explore our thesis project capabilities.</h3>
+                  <Button 
+                    className="w-full bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-2xl h-12 font-black text-xs"
+                    onClick={() => setShowcaseOpen(true)}
+                  >
+                    Open Full Showcase
+                  </Button>
+                </div>
+                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/20 blur-[80px] -mr-16 -mt-16 group-hover:bg-blue-500/30 transition-all" />
+              </Card>
+            </div>
+          </div>
+          
+          {/* Collapse toggle */}
+          <button 
+            onClick={() => setIsRightSidebarCollapsed(!isRightSidebarCollapsed)}
+            className="absolute left-0 top-1/2 -translate-x-1/2 z-30 w-8 h-16 bg-white border rounded-full flex items-center justify-center shadow-lg hover:bg-zinc-50 transition-all"
+          >
+            <ChevronLeft className={`w-5 h-5 text-zinc-400 transition-transform ${isRightSidebarCollapsed ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+
+        {/* MOBILE FLOATING RECENTER BUTTON */}
+        <div className="absolute right-6 bottom-24 z-30 lg:hidden">
           <Button 
-            className="w-14 h-14 rounded-2xl bg-white shadow-2xl border hover:bg-zinc-50 transition-all active:scale-90 group"
+            className="w-14 h-14 rounded-2xl bg-white shadow-2xl border hover:bg-zinc-50"
             onClick={() => { if (userLocation) { setMapCenter(userLocation); setFocusKey(f => f + 1); } }}
           >
             <Crosshair className={`w-6 h-6 ${gpsStatus === 'ready' ? 'text-blue-600' : 'text-zinc-400'}`} />
-          </Button>
-          <Button 
-            className="w-14 h-14 rounded-2xl bg-zinc-900 text-white shadow-2xl hover:bg-zinc-800 transition-all active:scale-90"
-            onClick={() => setShowcaseOpen(true)}
-          >
-            <LayoutGrid className="w-6 h-6" />
           </Button>
         </div>
 
         {/* JOURNEY PANEL OVERLAY */}
         {selectedRouteMeta && selectedInsights && (
-          <div className={`absolute z-50 transition-all duration-500 ${
-            isMobile ? 'inset-x-0 bottom-0' : 'top-4 right-4 bottom-4 w-[430px]'
+          <div className={`absolute z-[100] transition-all duration-500 ${
+            isMobile ? 'inset-x-0 bottom-0' : 'bottom-4 right-4 w-[430px]'
           }`}>
             <RouteJourneyPanel
               routeMeta={selectedRouteMeta}
@@ -447,11 +481,11 @@ function UserDashboardContent() {
               formatEta={formatEta}
               getStopOffsetFromBoarding={getStopOffsetFromBoarding}
               freshnessText={nearestBusFreshness}
-              onBack={() => { setSelectedRouteMeta(null); if (isMobile) setActiveTab('results'); }}
+              onBack={() => { setSelectedRouteMeta(null); }}
               onShare={async () => {
                 if (navigator.share) await navigator.share({ title: `Bus ${selectedRouteMeta.route.id}`, text: `Tracking ${selectedRouteMeta.route.name}` });
               }}
-              className={isMobile ? "rounded-t-[40px] shadow-2xl h-[85vh]" : "rounded-[32px] shadow-2xl h-full"}
+              className={isMobile ? "rounded-t-[40px] shadow-2xl h-[85vh]" : "rounded-[32px] shadow-2xl"}
               mobile={isMobile}
             />
           </div>
@@ -459,7 +493,7 @@ function UserDashboardContent() {
       </main>
 
       {/* MOBILE BOTTOM NAVIGATION */}
-      <div className="lg:hidden h-[72px] bg-white/80 backdrop-blur-xl border-t flex items-center justify-around px-4 z-[60] shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
+      <div className="lg:hidden h-[72px] bg-white border-t flex items-center justify-around px-4 z-[60]">
         {[
           { id: 'search', icon: Search, label: 'Search' },
           { id: 'results', icon: ListFilter, label: 'Routes' },
@@ -468,11 +502,9 @@ function UserDashboardContent() {
           <button 
             key={tab.id}
             onClick={() => setActiveTab(tab.id as any)}
-            className={`flex flex-col items-center gap-1 transition-all duration-300 ${activeTab === tab.id ? 'text-emerald-600 scale-110' : 'text-zinc-400 opacity-60'}`}
+            className={`flex flex-col items-center gap-1 ${activeTab === tab.id ? 'text-emerald-600' : 'text-zinc-400'}`}
           >
-            <div className={`p-2 rounded-2xl transition-all ${activeTab === tab.id ? 'bg-emerald-50 text-emerald-600' : ''}`}>
-              <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? 'stroke-[3px]' : 'stroke-[2px]'}`} />
-            </div>
+            <tab.icon className="w-5 h-5" />
             <span className="text-[8px] font-black uppercase tracking-widest">{tab.label}</span>
           </button>
         ))}

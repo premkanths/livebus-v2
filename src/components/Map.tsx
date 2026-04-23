@@ -85,15 +85,16 @@ function MapResizer() {
     if (!containerRef.current) return;
 
     const resizeObserver = new ResizeObserver(() => {
-      // Small delay to ensure the container has settled after CSS transitions
-      setTimeout(() => {
-        map.invalidateSize();
-      }, 50);
+      // Multiple invalidations to catch end of transitions
+      map.invalidateSize();
+      const timers = [50, 150, 300, 600].map(delay => 
+        setTimeout(() => map.invalidateSize(), delay)
+      );
+      return () => timers.forEach(clearTimeout);
     });
 
     resizeObserver.observe(containerRef.current);
 
-    // Also keep the window resize listener as a fallback
     const handleResize = () => {
       map.invalidateSize();
     };
@@ -103,9 +104,13 @@ function MapResizer() {
     // Initial invalidation
     map.invalidateSize();
 
+    // Periodic check as a safety net
+    const interval = setInterval(() => map.invalidateSize(), 1000);
+
     return () => {
       resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
+      clearInterval(interval);
     };
   }, [map]);
   return null;
