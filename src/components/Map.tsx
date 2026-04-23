@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, CircleMarker, Circle } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -46,6 +46,7 @@ interface MapProps {
   polylinePoints?: [number, number][]; // Optional high-fidelity path
   userLocation?: { lat: number; lng: number } | null;
   focusKey?: number;
+  layoutTrigger?: string | number;
 }
 
 // Helper to update map center dynamically (for single points)
@@ -76,43 +77,59 @@ function RouteFitter({ route, polylinePoints }: { route: Route | null; polylineP
 }
 
 // Helper to fix Leaflet "gray area" / missing tiles on resize or layout changes
-function MapResizer() {
+function MapResizer({ layoutTrigger }: { layoutTrigger?: string | number }) {
   const map = useMap();
   const containerRef = useRef<HTMLElement | null>(null);
+  const timeoutRefs = useRef<number[]>([]);
+
+  const invalidateMap = useCallback(() => {
+    map.invalidateSize({ pan: false });
+  }, [map]);
+
+  const scheduleInvalidate = useCallback(() => {
+    timeoutRefs.current.forEach((timer) => window.clearTimeout(timer));
+    timeoutRefs.current = [];
+
+    window.requestAnimationFrame(() => invalidateMap());
+
+    [80, 180, 320, 520].forEach((delay) => {
+      const timer = window.setTimeout(() => invalidateMap(), delay);
+      timeoutRefs.current.push(timer);
+    });
+  }, [invalidateMap]);
 
   useEffect(() => {
     containerRef.current = map.getContainer();
     if (!containerRef.current) return;
 
+    const observedElements = [containerRef.current, containerRef.current.parentElement].filter(
+      Boolean
+    ) as HTMLElement[];
+
     const resizeObserver = new ResizeObserver(() => {
-      // Multiple invalidations to catch end of transitions
-      map.invalidateSize();
-      const timers = [50, 150, 300, 600].map(delay => 
-        setTimeout(() => map.invalidateSize(), delay)
-      );
-      return () => timers.forEach(clearTimeout);
+      scheduleInvalidate();
     });
 
-    resizeObserver.observe(containerRef.current);
+    observedElements.forEach((element) => resizeObserver.observe(element));
 
     const handleResize = () => {
-      map.invalidateSize();
+      scheduleInvalidate();
     };
 
     window.addEventListener('resize', handleResize);
-    
-    // Initial invalidation
-    map.invalidateSize();
-
-    // Periodic check as a safety net
-    const interval = setInterval(() => map.invalidateSize(), 1000);
+    scheduleInvalidate();
 
     return () => {
       resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
-      clearInterval(interval);
+      timeoutRefs.current.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [map]);
+  }, [map, scheduleInvalidate]);
+
+  useEffect(() => {
+    scheduleInvalidate();
+  }, [layoutTrigger, scheduleInvalidate]);
+
   return null;
 }
 
@@ -142,7 +159,15 @@ const createUserIcon = () => {
   });
 };
 
-export default function Map({ buses = [], center, route, polylinePoints, userLocation, focusKey = 0 }: MapProps) {
+export default function Map({
+  buses = [],
+  center,
+  route,
+  polylinePoints,
+  userLocation,
+  focusKey = 0,
+  layoutTrigger,
+}: MapProps) {
   const markerRefs = useRef<{[key: string]: L.Marker}>({});
 
   useEffect(() => {
@@ -162,7 +187,7 @@ export default function Map({ buses = [], center, route, polylinePoints, userLoc
       style={{ height: "100%", width: "100%", zIndex: 0 }}
       zoomControl={false}
     >
-      <MapResizer />
+      <MapResizer layoutTrigger={layoutTrigger} />
       <ChangeView center={center} focusKey={focusKey} />
       <RouteFitter route={route || null} polylinePoints={polylinePoints} />
       
