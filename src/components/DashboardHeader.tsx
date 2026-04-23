@@ -63,7 +63,7 @@ export function DashboardHeader({ title }: DashboardHeaderProps) {
             LiveBus Tracker
           </p>
           <h1 className="font-bold text-xl tracking-tight hidden md:block">{title}</h1>
-          <h1 className="font-bold text-xl tracking-tight md:hidden">Presidency Bus</h1>
+          <h1 className="font-bold text-xl tracking-tight md:hidden">LiveBus Tracker</h1>
         </div>
       </div>
 

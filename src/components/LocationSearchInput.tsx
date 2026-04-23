@@ -36,7 +36,7 @@ export function LocationSearchInput({ placeholder, onLocationSelect, icon }: Loc
 
   // Debounce search
   useEffect(() => {
-    if (!query || query.length < 3 || selectedValue?.displayName === query) {
+    if (!query || query.length < 3 || (selectedValue && query === selectedValue.displayName.split(',')[0])) {
       setResults([]);
       setIsDropdownOpen(false);
       return;
