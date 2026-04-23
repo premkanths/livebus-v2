@@ -548,6 +548,139 @@ function UserDashboardContent() {
             layoutTrigger={layoutTrigger}
           />
 
+          {isMobile && activeTab === 'search' && (
+            <div className="absolute inset-x-4 top-4 z-20 rounded-[32px] border border-white/70 bg-white/95 p-4 shadow-2xl backdrop-blur">
+              <div className="mb-4 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-600 shadow-lg shadow-emerald-200/70">
+                  <Search className="h-4 w-4 text-white" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Trip Planner</p>
+                  <h2 className="text-lg font-black tracking-tight text-zinc-950">Plan Your Journey</h2>
+                </div>
+              </div>
+
+              <div className="mb-4 grid grid-cols-3 gap-2">
+                {[
+                  { label: 'Fresh', value: String(freshBuses.length), tone: 'text-emerald-600' },
+                  { label: 'GPS', value: gpsStatus === 'ready' ? 'On' : 'Off', tone: gpsStatus === 'ready' ? 'text-blue-600' : 'text-amber-600' },
+                  { label: 'Routes', value: String(matchingRoutes.length), tone: 'text-zinc-900' },
+                ].map((item) => (
+                  <div key={item.label} className="rounded-[22px] border border-zinc-200 bg-zinc-50 px-3 py-3">
+                    <p className="text-[9px] font-black uppercase tracking-[0.16em] text-zinc-400">{item.label}</p>
+                    <p className={`mt-1 text-base font-black ${item.tone}`}>{item.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="relative space-y-3">
+                <div className="absolute bottom-6 left-[18px] top-6 w-[2px] border-l border-dashed border-zinc-300 bg-zinc-200/40" />
+                <LocationSearchInput placeholder="From where?" onLocationSelect={setSource} />
+                <LocationSearchInput placeholder="To where?" onLocationSelect={setDest} />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-1/2 z-10 h-9 w-9 -translate-y-1/2 rounded-full border bg-white shadow-md hover:bg-zinc-50"
+                  onClick={() => { const s = source; setSource(dest); setDest(s); }}
+                >
+                  <ArrowDownUp className="h-4 w-4 text-zinc-400" />
+                </Button>
+              </div>
+
+              <Button
+                className="mt-4 h-12 w-full rounded-2xl bg-emerald-600 font-black text-white shadow-lg shadow-emerald-200 transition-all active:scale-[0.98] hover:bg-emerald-700"
+                onClick={handleSearch}
+                disabled={!source || !dest}
+              >
+                Find Live Buses
+              </Button>
+
+              {gpsStatus !== 'ready' && (
+                <Button
+                  variant="ghost"
+                  className="mt-3 h-11 w-full rounded-2xl border border-zinc-200 bg-white text-[11px] font-black uppercase tracking-[0.16em] text-zinc-700"
+                  onClick={requestDeviceLocation}
+                >
+                  <Crosshair className="mr-2 h-4 w-4" />
+                  Use My Location
+                </Button>
+              )}
+            </div>
+          )}
+
+          {isMobile && activeTab === 'results' && (
+            <div className="absolute inset-x-4 top-4 bottom-24 z-20 overflow-hidden rounded-[32px] border border-white/70 bg-white/95 shadow-2xl backdrop-blur">
+              <div className="flex items-center justify-between border-b border-zinc-200/80 p-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.22em] text-zinc-400">Route Matches</p>
+                  <h2 className="text-lg font-black tracking-tight text-zinc-950">{matchingRoutes.length} routes found</h2>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 rounded-2xl border border-zinc-200 bg-white text-zinc-500 shadow-sm"
+                  onClick={() => setActiveTab('map')}
+                >
+                  <MapIcon className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <div className="h-full space-y-4 overflow-y-auto bg-zinc-50/70 p-4 pb-24">
+                {(routesLoading || busesLoading) ? (
+                  <div className="space-y-4">
+                    {[1, 2, 3].map((i) => <Skeleton key={i} className="h-32 w-full rounded-3xl" />)}
+                  </div>
+                ) : matchingRoutes.length === 0 ? (
+                  <div className="py-10 text-center">
+                    <WifiOff className="mx-auto mb-4 h-10 w-10 text-zinc-300" />
+                    <p className="text-sm font-bold text-zinc-400">No routes yet. Try a different trip.</p>
+                  </div>
+                ) : (
+                  matchingRoutes.map((meta) => {
+                    const insights = getRouteInsights(meta);
+                    const active = selectedRouteMeta?.route.id === meta.route.id;
+                    return (
+                      <Card
+                        key={meta.route.id}
+                        className={`cursor-pointer rounded-[28px] border-2 p-5 transition-all ${
+                          active ? 'border-emerald-500 bg-white ring-4 ring-emerald-500/10' : 'border-zinc-100 bg-white'
+                        }`}
+                        onClick={() => handleRouteSelect(meta)}
+                      >
+                        <div className="mb-4 flex items-start justify-between">
+                          <div
+                            className="rounded-xl px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white shadow-sm"
+                            style={{ backgroundColor: meta.route.color }}
+                          >
+                            Route {meta.route.id}
+                          </div>
+                          <span className="text-lg font-black text-zinc-900">{meta.estimatedDurationMins}m</span>
+                        </div>
+
+                        <div className="flex items-center gap-3 py-2 text-xs font-bold text-zinc-600">
+                          <span className="truncate">{meta.sourceStop.name}</span>
+                          <ArrowRight className="h-3 w-3 shrink-0" />
+                          <span className="truncate">{meta.destStop.name}</span>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-2 gap-3">
+                          <div className="rounded-2xl bg-zinc-50 px-3 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">ETA</p>
+                            <p className="mt-1 text-sm font-black text-zinc-900">{formatEta(insights.nearestBus?.etaMins ?? null)}</p>
+                          </div>
+                          <div className="rounded-2xl bg-zinc-50 px-3 py-3">
+                            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400">Walk</p>
+                            <p className="mt-1 text-sm font-black text-zinc-900">{formatDistance(insights.boardingDistanceKm)}</p>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
           {selectedRouteMeta && (
             <div className="absolute right-4 top-4 z-20">
               <Button
