@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Bus, Clock3, MapPinned, Navigation, Share2, Star } from "lucide-react";
+import { Activity, ArrowLeft, Bus, Clock3, MapPinned, Share2, Star, X } from "lucide-react";
 import { MatchingRoute, Stop } from "@/context/RouteContext";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -111,11 +111,12 @@ export function RouteJourneyPanel({
             <div className="mb-3 flex items-center gap-2">
               <button
                 type="button"
-                className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/80 bg-white text-zinc-600 shadow-sm"
-                aria-label="Back"
+                className="flex h-10 items-center gap-2 rounded-2xl border border-white/80 bg-white px-3 text-zinc-600 shadow-sm transition hover:bg-zinc-50"
+                aria-label="Back to normal map"
                 onClick={onBack}
               >
-                <Navigation className="h-4 w-4 -rotate-45" />
+                <ArrowLeft className="h-4 w-4" />
+                <span className="text-[11px] font-black uppercase tracking-[0.18em]">Back</span>
               </button>
               <div
                 className="inline-flex rounded-2xl px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.24em] text-white shadow-sm"
@@ -133,6 +134,14 @@ export function RouteJourneyPanel({
           </div>
 
           <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10 rounded-2xl border border-white/80 bg-white text-zinc-500 shadow-sm hover:bg-zinc-50"
+              onClick={onBack}
+            >
+              <X className="h-4 w-4" />
+            </Button>
             <Button
               variant="ghost"
               size="icon"

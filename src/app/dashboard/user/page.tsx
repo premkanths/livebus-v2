@@ -16,6 +16,7 @@ import {
   WifiOff, 
   Search, 
   ListFilter, 
+  X,
   ChevronLeft, 
   ChevronRight,
   ArrowRight, 
@@ -78,6 +79,19 @@ function formatEta(minutes: number | null) {
   if (minutes === null) return 'ETA unavailable';
   if (minutes <= 1) return 'Arriving now';
   return `${minutes} min`;
+}
+
+function getGeolocationErrorMessage(error: GeolocationPositionError) {
+  switch (error.code) {
+    case error.PERMISSION_DENIED:
+      return 'Location access denied. Please allow location in your browser.';
+    case error.POSITION_UNAVAILABLE:
+      return 'Location unavailable on this device right now.';
+    case error.TIMEOUT:
+      return 'Location request timed out. Try again.';
+    default:
+      return 'Location unavailable. Check permissions.';
+  }
 }
 
 function getStopOffsetFromBoarding(routeMeta: MatchingRoute, stopTimeFromStart?: number) {
@@ -143,6 +157,7 @@ function UserDashboardContent() {
   const [isResultsPanelOpen, setIsResultsPanelOpen] = useState(false);
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false);
   const [isPlannerCollapsed, setIsPlannerCollapsed] = useState(false);
+  const watchIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 1024);
@@ -205,26 +220,67 @@ function UserDashboardContent() {
     return () => unsubscribe();
   }, []);
 
+  const applyUserLocation = (loc: { lat: number; lng: number }, shouldCenter = true) => {
+    setUserLocation(loc);
+    setGpsStatus('ready');
+    if (shouldCenter) {
+      setMapCenter(loc);
+      setHasAutoCentered(true);
+      setFocusKey((f) => f + 1);
+    }
+  };
+
+  const requestDeviceLocation = () => {
+    if (!('geolocation' in navigator)) {
+      setGpsStatus('unsupported');
+      toast({ title: 'GPS Unsupported', description: 'This browser cannot access your location.' });
+      return;
+    }
+
+    setGpsStatus('locating');
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        applyUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
+      (error) => {
+        const nextStatus = error.code === error.PERMISSION_DENIED ? 'denied' : 'error';
+        setGpsStatus(nextStatus);
+        toast({
+          title: nextStatus === 'denied' ? 'Location Blocked' : 'Location Unavailable',
+          description: getGeolocationErrorMessage(error),
+        });
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+
   useEffect(() => {
     if (!('geolocation' in navigator)) {
       setGpsStatus('unsupported');
       return;
     }
-    const watchId = navigator.geolocation.watchPosition(
+
+    requestDeviceLocation();
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
-        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        setUserLocation(loc);
-        setGpsStatus('ready');
-        if (!hasAutoCentered) {
-          setMapCenter(loc);
-          setHasAutoCentered(true);
-          setFocusKey(f => f + 1);
-        }
+        applyUserLocation(
+          { lat: pos.coords.latitude, lng: pos.coords.longitude },
+          !hasAutoCentered
+        );
       },
-      () => setGpsStatus('error'),
-      { enableHighAccuracy: false, timeout: 20000, maximumAge: 10000 }
+      (error) => {
+        setGpsStatus(error.code === error.PERMISSION_DENIED ? 'denied' : 'error');
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 }
     );
-    return () => navigator.geolocation.clearWatch(watchId);
+
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+    };
   }, [hasAutoCentered]);
 
   useEffect(() => {
@@ -233,16 +289,36 @@ function UserDashboardContent() {
     return () => clearInterval(timer);
   }, []);
 
+  const clearSelectedRoute = () => {
+    setSelectedRouteMeta(null);
+    setIsWatching(false);
+  };
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && selectedRouteMeta) {
+        clearSelectedRoute();
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [selectedRouteMeta]);
+
   const handleSearch = () => {
     if (!source && !dest) return;
     setMatchingRoutes(findLenientMatchingRoutes(source?.lat || null, source?.lng || null, dest?.lat || null, dest?.lng || null, 8));
-    setSelectedRouteMeta(null);
+    clearSelectedRoute();
     setIsResultsPanelOpen(true);
     if (isMobile) setActiveTab('results');
   };
 
   const handleRouteSelect = (meta: MatchingRoute) => {
-    setSelectedRouteMeta(meta);
+    if (selectedRouteMeta?.route.id === meta.route.id) {
+      clearSelectedRoute();
+    } else {
+      setSelectedRouteMeta(meta);
+    }
     if (isMobile) setActiveTab('map');
   };
 
@@ -286,7 +362,7 @@ function UserDashboardContent() {
   const gpsMessage = {
     locating: 'Trying to locate you...',
     ready: userLocation ? 'Your live location is visible on the map.' : 'Location found.',
-    denied: 'Location access denied. Please enable GPS in your browser.',
+    denied: 'Location access denied. Please allow location in your browser.',
     unsupported: 'Geolocation is not supported in this browser.',
     error: 'Location unavailable. Check permissions.',
   }[gpsStatus];
@@ -347,13 +423,15 @@ function UserDashboardContent() {
                   { icon: Bus, label: 'Routes' },
                   { icon: Crosshair, label: 'Locate' },
                 ].map((item) => (
-                  <div
+                  <button
+                    type="button"
                     key={item.label}
                     className="flex h-12 w-12 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-500 shadow-sm"
                     title={item.label}
+                    onClick={item.label === 'Locate' ? requestDeviceLocation : undefined}
                   >
                     <item.icon className="h-5 w-5" />
-                  </div>
+                  </button>
                 ))}
               </div>
 
@@ -469,9 +547,21 @@ function UserDashboardContent() {
             focusKey={focusKey}
             layoutTrigger={layoutTrigger}
           />
+
+          {selectedRouteMeta && (
+            <div className="absolute right-4 top-4 z-20">
+              <Button
+                className="h-11 rounded-2xl border border-white/80 bg-white/95 px-4 text-[11px] font-black uppercase tracking-[0.18em] text-zinc-700 shadow-lg backdrop-blur hover:bg-white"
+                onClick={clearSelectedRoute}
+              >
+                <X className="mr-2 h-4 w-4" />
+                Back To Map
+              </Button>
+            </div>
+          )}
           
           {/* FLOATING STATUS CARD (TOP LEFT) */}
-          <div className="absolute top-4 left-4 z-10 hidden md:block">
+          <div className={`absolute left-4 z-10 hidden md:block ${selectedRouteMeta ? 'top-20' : 'top-4'}`}>
             <Card className="p-4 bg-white/90 backdrop-blur shadow-xl border-white/20 rounded-3xl w-64">
               <div className="flex items-center gap-2 mb-2">
                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -484,6 +574,17 @@ function UserDashboardContent() {
                 <Activity className="w-3 h-3" />
                 Tracking {freshBuses.length} fresh buses
               </div>
+              {gpsStatus !== 'ready' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-3 h-9 rounded-2xl border border-zinc-200 bg-white px-3 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-700 hover:bg-zinc-50"
+                  onClick={requestDeviceLocation}
+                >
+                  <Crosshair className="mr-2 h-3.5 w-3.5" />
+                  Use My Location
+                </Button>
+              )}
             </Card>
           </div>
         </div>
@@ -553,7 +654,14 @@ function UserDashboardContent() {
         <div className="absolute right-6 bottom-24 z-30 lg:hidden">
           <Button 
             className="w-14 h-14 rounded-2xl bg-white shadow-2xl border hover:bg-zinc-50"
-            onClick={() => { if (userLocation) { setMapCenter(userLocation); setFocusKey(f => f + 1); } }}
+            onClick={() => {
+              if (userLocation) {
+                setMapCenter(userLocation);
+                setFocusKey(f => f + 1);
+              } else {
+                requestDeviceLocation();
+              }
+            }}
           >
             <Crosshair className={`w-6 h-6 ${gpsStatus === 'ready' ? 'text-blue-600' : 'text-zinc-400'}`} />
           </Button>
@@ -578,7 +686,7 @@ function UserDashboardContent() {
               formatEta={formatEta}
               getStopOffsetFromBoarding={getStopOffsetFromBoarding}
               freshnessText={nearestBusFreshness}
-              onBack={() => { setSelectedRouteMeta(null); }}
+              onBack={clearSelectedRoute}
               onShare={async () => {
                 if (navigator.share) await navigator.share({ title: `Bus ${selectedRouteMeta.route.id}`, text: `Tracking ${selectedRouteMeta.route.name}` });
               }}
